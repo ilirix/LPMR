@@ -56,11 +56,12 @@ pub fn api_router() -> Router<AppState> {
         .route("/api/operations", post(run_operation))
 }
 
-pub fn static_router() -> Router<AppState> {
+pub fn static_router(assets_dir: std::path::PathBuf) -> Router<AppState> {
+    let web_root = assets_dir.join("web");
     Router::new()
         .route("/", get(index))
-        .nest_service("/assets", ServeDir::new("assets/web"))
-        .fallback_service(ServeFile::new("assets/web/index.html"))
+        .nest_service("/assets", ServeDir::new(web_root.clone()))
+        .fallback_service(ServeFile::new(web_root.join("index.html")))
 }
 
 async fn health() -> Json<serde_json::Value> {

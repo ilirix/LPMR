@@ -8,13 +8,13 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-pub async fn serve(bind: SocketAddr) -> Result<()> {
+pub async fn serve(bind: SocketAddr, assets_dir: std::path::PathBuf) -> Result<()> {
     let app = Router::new()
         .merge(routes::api_router())
-        .merge(routes::static_router())
+        .merge(routes::static_router(assets_dir.clone()))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
-        .with_state(state::AppState::new());
+        .with_state(state::AppState::new(assets_dir));
 
     info!("LPMR web panel listening on http://{bind}");
     let listener = tokio::net::TcpListener::bind(bind).await?;

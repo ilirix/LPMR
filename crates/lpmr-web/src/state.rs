@@ -5,13 +5,15 @@ use lpmr_core::themes::default_theme;
 pub struct AppState {
     pub default_lang: Language,
     pub default_theme_id: String,
+    pub assets_dir: std::path::PathBuf,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(assets_dir: std::path::PathBuf) -> Self {
         Self {
             default_lang: Language::En,
             default_theme_id: default_theme().id,
+            assets_dir,
         }
     }
 }

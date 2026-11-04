@@ -18,8 +18,8 @@ pub struct EnterpriseTheme {
 impl EnterpriseTheme {
     pub fn css_vars(&self) -> String {
         format!(
-            "--lpmr-window:{};--lpmr-panel:{};--lpmr-accent:{};--lpmr-text:{};--lpmr-border:{};--lpmr-success:{};--lpmr-warning:{};--lpmr-danger:{};",
-            self.window, self.panel, self.accent, self.text, self.border, self.success, self.warning, self.danger
+            "--lpmr-window:{};--lpmr-panel:{};--lpmr-accent:{};--lpmr-text:{};--lpmr-border:{};--lpmr-success:{};--lpmr-warning:{};--lpmr-danger:{};--lpmr-header:{};",
+            self.window, self.panel, self.accent, self.text, self.border, self.success, self.warning, self.danger, self.panel
         )
     }
 }

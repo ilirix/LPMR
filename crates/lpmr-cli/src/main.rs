@@ -43,8 +43,9 @@ async fn main() -> Result<()> {
         Commands::Tui => lpmr_tui::run_tui()?,
         Commands::Web { bind } => {
             let addr: SocketAddr = bind.parse()?;
-            std::env::set_current_dir(workspace_root())?;
-            lpmr_web::serve(addr).await?;
+            let root = workspace_root();
+            std::env::set_current_dir(&root)?;
+            lpmr_web::serve(addr, root.join("assets")).await?;
         }
         Commands::Doctor => doctor()?,
         Commands::Tools => tools_list()?,
