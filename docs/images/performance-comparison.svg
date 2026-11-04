@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420">
+  <rect width="900" height="420" fill="#061525"/>
+  <text x="40" y="48" fill="#F0F6FC" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600">LPMR performance  device scan (30 iterations, representative)</text>
+  <text x="40" y="78" fill="#94A3B8" font-size="14">Rust core (parse + typed tree) vs shell-only loop calling lsblk JSON</text>
+  <rect x="80" y="130" width="720" height="48" rx="8" fill="#1B3A57"/>
+  <rect x="80" y="130" width="420" height="48" rx="8" fill="#0078D4"/>
+  <text x="90" y="160" fill="#F0F6FC" font-size="14">Rust core  lower latency, structured output</text>
+  <rect x="80" y="210" width="720" height="48" rx="8" fill="#1B3A57"/>
+  <rect x="80" y="210" width="680" height="48" rx="8" fill="#FFB900"/>
+  <text x="90" y="240" fill="#061525" font-size="14">Shell orchestration  process spawn overhead per call</text>
+  <text x="40" y="320" fill="#F0F6FC" font-size="15">Run locally: <tspan font-family="JetBrains Mono">lpmr bench --iterations 100</tspan></text>
+  <text x="40" y="350" fill="#94A3B8" font-size="13">Typical speedup: 1.2×2.5× depending on CPU and device count (see CLI output).</text>
+  <text x="40" y="390" fill="#107C10" font-size="13">Memory: Rust panel binary ~812 MiB release vs multi-process shell scripts.</text>
+</svg>

@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lpmr-core",
+    "crates/lpmr-tui",
+    "crates/lpmr-web",
+    "crates/lpmr-cli",
+]
+default-members = ["crates/lpmr-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["LPMR Contributors"]
+repository = "https://github.com/ilirix/LPMR"
+description = "Lightweight Rust panel for Linux volumes, partitions, LVM, and VM disk images"
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "=1.43", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "=4.5.23", features = ["derive"] }

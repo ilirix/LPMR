@@ -1,0 +1,18 @@
+[package]
+name = "lpmr-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core storage operations for LPMR"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+which = "6"
+glob = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
