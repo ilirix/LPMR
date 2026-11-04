@@ -91,7 +91,9 @@ async fn i18n_bundle(Path(lang): Path<String>) -> Json<serde_json::Value> {
     let language = Language::from_code(&lang);
     let keys = [
         "app.title",
+        "nav.dashboard",
         "nav.devices",
+        "nav.devices.sub",
         "nav.lvm",
         "nav.images",
         "nav.proxmox",

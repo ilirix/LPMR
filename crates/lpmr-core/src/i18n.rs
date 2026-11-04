@@ -61,7 +61,9 @@ type Table = &'static [(&'static str, &'static str)];
 
 const EN: Table = &[
     ("app.title", "LPMR Storage Panel"),
+    ("nav.dashboard", "Dashboard"),
     ("nav.devices", "Devices"),
+    ("nav.devices.sub", "Local disks & partitions"),
     ("nav.lvm", "LVM"),
     ("nav.images", "VM Images"),
     ("nav.proxmox", "Proxmox"),
