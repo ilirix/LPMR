@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <rect width="960" height="540" fill="#0F172A"/>
+  <rect x="16" y="16" width="928" height="508" rx="8" fill="#0B1220" stroke="#334155"/>
+  <text x="28" y="40" fill="#38BDF8" font-family="JetBrains Mono, monospace" font-size="14"> LPMR · Terminal panel · Theme: Slate Pro</text>
+  <line x1="16" y1="52" x2="944" y2="52" stroke="#334155"/>
+  <rect x="28" y="64" width="280" height="420" fill="#1E293B" stroke="#334155"/>
+  <text x="40" y="88" fill="#94A3B8" font-size="12">Devices | LVM | Tools</text>
+  <text x="40" y="120" fill="#E2E8F0" font-family="JetBrains Mono" font-size="13">¸ loop0   4.0 GiB</text>
+  <text x="40" y="142" fill="#E2E8F0" font-family="JetBrains Mono" font-size="13">¸ sda   128 GiB</text>
+  <rect x="320" y="64" width="360" height="420" fill="#1E293B" stroke="#334155"/>
+  <text x="332" y="88" fill="#94A3B8" font-size="12">Details</text>
+  <text x="332" y="120" fill="#E2E8F0" font-family="JetBrains Mono" font-size="12">Path: /dev/sda</text>
+  <rect x="692" y="64" width="240" height="420" fill="#1E293B" stroke="#334155"/>
+  <text x="704" y="88" fill="#94A3B8" font-size="12">Operations</text>
+  <text x="704" y="120" fill="#FBBF24" font-size="12">Most actions require root.</text>
+  <rect x="28" y="492" width="904" height="24" fill="#111827" stroke="#334155"/>
+  <text x="40" y="508" fill="#4ADE80" font-family="JetBrains Mono" font-size="11">Keys: r refresh · t theme · d dry-run · q quit</text>
+</svg>

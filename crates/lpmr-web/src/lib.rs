@@ -1,0 +1,23 @@
+mod routes;
+mod state;
+
+use anyhow::Result;
+use axum::Router;
+use std::net::SocketAddr;
+use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
+use tracing::info;
+
+pub async fn serve(bind: SocketAddr) -> Result<()> {
+    let app = Router::new()
+        .merge(routes::api_router())
+        .merge(routes::static_router())
+        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http())
+        .with_state(state::AppState::new());
+
+    info!("LPMR web panel listening on http://{bind}");
+    let listener = tokio::net::TcpListener::bind(bind).await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}
