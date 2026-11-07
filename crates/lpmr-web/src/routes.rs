@@ -1,17 +1,22 @@
+use crate::jobs::{ConvertJobRequest, JobStatus, spawn_convert};
+use crate::jobs::run_convert_async;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Json};
 use axum::routing::{get, post};
 use axum::Router;
-use lpmr_core::devices::scan_block_devices;
+use lpmr_core::devices::{scan_block_devices, BlockDeviceTree};
 use lpmr_core::i18n::{Language, translate};
 use lpmr_core::lvm::scan_lvm;
 use lpmr_core::ops::{execute, OperationKind, OperationRequest};
+use lpmr_core::partition_map::partition_map_for_disk;
 use lpmr_core::proxmox::{is_proxmox_node, list_storages, list_storage_volumes};
 use lpmr_core::qemu::{image_info, QemuFormat};
-use lpmr_core::themes::{enterprise_themes, theme_by_id};
-use lpmr_core::tools::discover_installed_tools;
+use lpmr_core::telemetry::host_telemetry;
+use lpmr_core::themes::enterprise_themes;
+use lpmr_core::tools::{discover_installed_tools, required_tools};
+use lpmr_core::zfs::{list_pools, zfs_available};
 use serde::Deserialize;
 use serde_json::json;
 use tower_http::services::{ServeDir, ServeFile};
@@ -54,6 +59,13 @@ pub fn api_router() -> Router<AppState> {
         .route("/api/qemu/info", get(qemu_info))
         .route("/api/qemu/formats", get(qemu_formats))
         .route("/api/operations", post(run_operation))
+        .route("/api/telemetry", get(telemetry))
+        .route("/api/partitions", get(partitions))
+        .route("/api/zfs/pools", get(zfs_pools))
+        .route("/api/health-audit", get(health_audit))
+        .route("/api/vm-volumes", get(vm_volumes))
+        .route("/api/jobs/convert", post(job_convert))
+        .route("/api/jobs/:id", get(job_status))
 }
 
 pub fn static_router(assets_dir: std::path::PathBuf) -> Router<AppState> {
@@ -138,6 +150,119 @@ async fn qemu_formats() -> Json<serde_json::Value> {
     Json(json!({"formats": formats}))
 }
 
+#[derive(Deserialize)]
+struct DiskQuery {
+    disk: String,
+}
+
+async fn telemetry() -> Json<serde_json::Value> {
+    let host = host_telemetry();
+    Json(json!({
+        "host": host,
+        "engine": "Rust Axum",
+        "features": ["tokio", "tower-http compression", "lsblk cache"]
+    }))
+}
+
+async fn partitions(Query(q): Query<DiskQuery>) -> Result<Json<serde_json::Value>, AppError> {
+    let map = partition_map_for_disk(&q.disk).ok_or_else(|| anyhow::anyhow!("disk not found"))?;
+    Ok(Json(json!(map)))
+}
+
+async fn zfs_pools() -> Result<Json<serde_json::Value>, AppError> {
+    if !zfs_available() {
+        return Ok(Json(json!({"available": false, "pools": []})));
+    }
+    let pools = list_pools()?;
+    Ok(Json(json!({"available": true, "pools": pools})))
+}
+
+async fn health_audit() -> Result<Json<serde_json::Value>, AppError> {
+    let installed = discover_installed_tools();
+    let missing: Vec<_> = required_tools()
+        .into_iter()
+        .filter(|(name, _)| !installed.iter().any(|t| t.name == *name))
+        .map(|(name, purpose)| json!({"name": name, "purpose": purpose, "ok": false}))
+        .collect();
+    let present: Vec<_> = installed
+        .iter()
+        .map(|t| json!({"name": t.name, "purpose": t.purpose, "ok": true, "path": t.path}))
+        .collect();
+    let tree: BlockDeviceTree = scan_block_devices()?;
+    Ok(Json(json!({
+        "tools_ok": present,
+        "tools_missing": missing,
+        "device_count": tree.devices.len(),
+        "zfs": zfs_available(),
+        "proxmox": is_proxmox_node(),
+    })))
+}
+
+async fn vm_volumes() -> Result<Json<serde_json::Value>, AppError> {
+    let mut volumes = Vec::new();
+    if is_proxmox_node() {
+        for storage in list_storages()? {
+            let list = list_storage_volumes(&storage.name).unwrap_or_default();
+            for vol in list {
+                volumes.push(json!({
+                    "volid": vol.volid,
+                    "format": vol.format,
+                    "size": vol.size,
+                    "storage": storage.name,
+                }));
+            }
+        }
+    }
+    Ok(Json(json!({"volumes": volumes})))
+}
+
+async fn job_convert(
+    State(state): State<AppState>,
+    Json(body): Json<ConvertJobRequest>,
+) -> Json<serde_json::Value> {
+    let mut record = spawn_convert(body.clone()).await;
+    let id = record.id.clone();
+    state.jobs.write().await.insert(id.clone(), record.clone());
+    if !record.dry_run {
+        let jobs = state.jobs.clone();
+        let job_id = id.clone();
+        let source = body.source.clone();
+        let dest = body.dest.clone();
+        let format = body.format.unwrap_or_else(|| "qcow2".into());
+        tokio::spawn(async move {
+            let result = run_convert_async(source, dest, format).await;
+            let mut map = jobs.write().await;
+            if let Some(job) = map.get_mut(&job_id) {
+                match result {
+                    Ok((msg, logs, pct)) => {
+                        job.status = JobStatus::Done;
+                        job.progress_pct = pct;
+                        job.message = msg;
+                        job.logs.extend(logs);
+                    }
+                    Err(e) => {
+                        job.status = JobStatus::Failed;
+                        job.message = e.to_string();
+                    }
+                }
+            }
+        });
+    }
+    Json(json!(record))
+}
+
+async fn job_status(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let map = state.jobs.read().await;
+    let job = map
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("job not found"))?;
+    Ok(Json(json!(job)))
+}
+
 async fn run_operation(Json(body): Json<OpBody>) -> Result<Json<serde_json::Value>, AppError> {
     let req = OperationRequest {
         kind: body.kind,
@@ -169,7 +294,6 @@ async fn index(State(state): State<AppState>, Query(q): Query<LangQuery>) -> Htm
         .as_deref()
         .map(Language::from_code)
         .unwrap_or(state.default_lang);
-    let theme = theme_by_id(&state.default_theme_id).unwrap_or_else(lpmr_core::themes::default_theme);
     let title = translate(lang, "app.title");
     Html(format!(
         r#"<!DOCTYPE html>
@@ -178,18 +302,15 @@ async fn index(State(state): State<AppState>, Query(q): Query<LangQuery>) -> Htm
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{title}</title>
-  <link rel="stylesheet" href="/assets/app.css"/>
-  <style>:root{{{}}}</style>
+  <link rel="stylesheet" href="/assets/app.css?v=5"/>
 </head>
 <body>
-  <div id="app" data-lang="{}" data-theme="{}"></div>
-  <script src="/assets/app.js"></script>
+  <div id="app" data-lang="{}" data-theme="orange"></div>
+  <script src="/assets/app.js?v=5"></script>
 </body>
 </html>"#,
         lang.code(),
-        theme.css_vars(),
-        lang.code(),
-        theme.id
+        lang.code()
     ))
 }
 

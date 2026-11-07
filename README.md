@@ -1,135 +1,164 @@
-# LPMR — Linux Partitions Manager (Rust)
+# LPMR — Proxmox VE Storage Orchestrator (Rust)
 
-Lightweight **Rust** control panel for Linux block storage, LVM, LUKS, VM disk images (RAW, QCOW2, VMDK, VDI, VHDX), and optional **Proxmox VE** storage (`pvesm`, `qm importdisk`). The UI follows the **docked workspace layout** from [Raven](https://github.com/oscar-soirey/Raven) (header bar, left navigator, center details, operations column, bottom log).
+Lightweight **Rust** control plane for Linux block storage, partitions, LVM, LUKS, ZFS, Proxmox VE (`pvesm`, `qm`), and VM disk images (**RAW, QCOW2, VMDK, VHDX**). The web UI follows the **Raven // Baremetal** orchestrator layout (orange Proxmox enterprise theme, toolchain audit rail, integrated log, conversion modals).
 
-**Default language:** English. Built-in UI strings also ship for **Spanish, Chinese, Hindi, Arabic, and French**.
+**Languages:** English (default) plus Spanish, Chinese, Hindi, Arabic, French.
 
-![Web panel mockup](docs/images/web-panel-mockup.svg)
-
-![Terminal panel mockup](docs/images/tui-panel-mockup.svg)
-
-## Features (inspired by Cockpit, Webmin, Proxmox)
-
-| Area | Capabilities |
-|------|----------------|
-| **Block devices** | Scan disks/partitions/loop (`lsblk`), sizes, models, mount points |
-| **Partitions** | GPT/MBR label, create/delete/resize (`parted`) |
-| **Filesystems** | ext4, XFS, Btrfs, FAT32, NTFS, swap — format, mount, unmount |
-| **LVM** | PV/VG/LV listing; create VG/LV; extend LV |
-| **VM images** | `qemu-img` info, create, resize, convert (raw ↔ qcow2 ↔ vmdk …) |
-| **Proxmox** | Storage status, volume lists, path resolution when `pvesm` is present |
-| **Encryption** | LUKS open/close via `cryptsetup` |
-| **Safety** | API and CLI default to **dry-run** for destructive flows |
-
-## System tools
-
-Install recommended packages (Debian/Ubuntu):
+## Quick start (one script)
 
 ```bash
-sudo ./scripts/install-deps.sh
+chmod +x start.sh
+./start.sh
 ```
 
-Verify:
+Open **http://localhost:8787** (bind override: `LPMR_BIND=127.0.0.1:8787 ./start.sh`).
 
-```bash
-./target/release/lpmr doctor
-./target/release/lpmr tools
-```
+Optional dependency install: `LPMR_INSTALL_DEPS=1 ./start.sh`
 
-Core tools: `lsblk`, `parted`, `blkid`, `findmnt`, `mkfs.*`, `mount`, `umount`, `lvm`, `qemu-img`, `cryptsetup`, `rsync`. Optional: `mdadm`, `zfs`, `pvesm`, `qm`.
-
-## Build
-
-Requires Rust **1.85+** (stable). From the repository root:
+Equivalent CLI:
 
 ```bash
 cargo build --release
+./target/release/lpmr start          # 0.0.0.0:8787
+./target/release/lpmr tui            # terminal panel
 ```
 
-Binary: `target/release/lpmr`
+## GUI screenshots
 
-## Usage
+### Main orchestrator (disks, partition visualizer, toolchain audit, log)
 
-### Web application
+![Main orchestrator](docs/images/gui-orchestrator-main.png)
 
-Run from the **repository root** (static assets live under `assets/web/`):
+### VHDX conversion & dynamic resize modal
 
-```bash
-./target/release/lpmr web --bind 127.0.0.1:8787
-```
+![VHDX conversion](docs/images/gui-vhdx-conversion.png)
 
-Open `http://127.0.0.1:8787` — switch **enterprise themes** and **language** from the header. REST API under `/api/*` (devices, LVM, tools, themes, i18n, Proxmox, qemu, operations).
+### RAW conversion & export pipeline modal
 
-### Terminal application
+![RAW / NVMe-oF pipeline](docs/images/gui-raw-nvmeof-pipeline.png)
 
-Raven-style three-column TUI (Ratatui):
+## Feature reference
 
-```bash
-./target/release/lpmr tui
-```
+### Top bar & navigation
 
-| Key | Action |
-|-----|--------|
-| `r` | Refresh devices / LVM / tools |
-| `Tab` | Cycle navigator tabs |
-| `j` / `k` | Move selection |
-| `t` | Cycle enterprise theme |
-| `l` | Cycle language |
-| `d` | Sample dry-run operation |
-| `q` | Quit |
+| Element | Function |
+|---------|----------|
+| **Search** | Filters block devices and VM volume table client-side |
+| **Open Terminal** | Hint to run `lpmr tui` for full-screen terminal UI on the host |
+| **+ Create Volume** | Modal to create a new `qcow2`/`raw` image (dry-run by default) |
+| **Tabs: Disks / VM Images / ZFS / Health** | Switches the center workspace |
 
-### Performance comparison (Rust panel vs shell-only)
+### Metrics strip
 
-The panel wraps system tools in a typed Rust core instead of ad-hoc shell scripts. Benchmark device scans:
+Live data from `GET /api/telemetry`:
 
-```bash
-./target/release/lpmr bench --iterations 100
-```
+- Hostname & kernel (`/etc/hostname`, `/proc`)
+- **Rust RSS** — resident memory of the panel process (typical single-digit MiB)
+- Device & tool counts
+
+### Disks workspace
+
+| Feature | Backend |
+|---------|---------|
+| **Partition visualizer** | `GET /api/partitions?disk=/dev/...` (child partitions vs disk size) |
+| **Device list** | `GET /api/devices` (`lsblk` JSON) |
+| **Mount / Format / Unmount** | `POST /api/operations` with `dry_run` default |
+| **Convert image** | Opens conversion modal → `POST /api/jobs/convert` (`qemu-img convert -p`) |
+
+### VM Images workspace
+
+| Feature | Backend |
+|---------|---------|
+| Volume table | `GET /api/vm-volumes` (aggregates `pvesm list` on Proxmox nodes) |
+| Per-row **Convert** | Pre-fills VHDX/QCOW pipeline modal |
+
+### ZFS Pools workspace
+
+| Feature | Backend |
+|---------|---------|
+| Pool cards (health, size, free) | `GET /api/zfs/pools` (`zpool list` when `zpool` is installed) |
+
+### Health Audit workspace
+
+| Feature | Backend |
+|---------|---------|
+| Toolchain grid (OK / missing) | `GET /api/health-audit` |
+| Proxmox / ZFS detection flags | Same endpoint |
+
+### Right rail
+
+| Panel | Function |
+|-------|----------|
+| **System toolchain** | Mirrors Cockpit/Webmin-style dependency audit (`lpmr doctor` data) |
+| **Integrated log** | UI + API events; mirrors conversion progress lines |
+
+### Modals (Raven-style pipelines)
+
+1. **VHDX conversion & resize** — source/dest/format, dry-run, async job with progress polling (`GET /api/jobs/:id`).
+2. **RAW / QCOW2 pipeline** — same job engine (real `qemu-img` when dry-run off; requires root/capabilities).
+3. **Create volume** — `CreateImage` operation via `/api/operations`.
+
+### Terminal UI (`lpmr tui`)
+
+Keyboard-driven Ratatui panel for the same data sets when SSH’d into a node without a browser.
+
+### Enterprise themes (web)
+
+**Orange** (default), **Obsidian**, **Arctic** — CSS variables on `<html data-ui-theme>`.
+
+## Performance notes
+
+| Technique | Why |
+|-----------|-----|
+| **Rust + Axum** | Single binary, typed `lsblk` parsing, no shell orchestration per request |
+| **tower-http gzip** | Compresses JSON/CSS/JS responses for remote Proxmox UI access |
+| **Tokio job tasks** | `qemu-img convert` runs off the request thread; UI polls progress |
+| **Thin front-end** | Vanilla JS (no React build); fast first paint |
+
+Benchmark device scan: `./target/release/lpmr bench --iterations 100`
 
 ![Performance comparison](docs/images/performance-comparison.svg)
 
-**What you gain with Rust (even when raw `lsblk` time is similar):**
+## System tools
 
-- Single static binary for web + TUI + API
-- Structured JSON domain models (devices, LVM, qemu, Proxmox)
-- Centralized validation (paths under `/dev/`, dry-run defaults)
-- Lower memory footprint vs spawning bash/Python orchestration per action
-- Shared i18n and theme tokens across web and terminal
+```bash
+sudo ./scripts/install-deps.sh
+./target/release/lpmr doctor
+```
 
-Example on this environment (20 iterations): Rust core ~1.95 ms/op vs shell loop ~1.88 ms/op — the win is **architecture and safety**, not replacing `lsblk` itself.
+Includes: `lsblk`, `parted`, `qemu-img`, `lvm`, `cryptsetup`, `ntfs-3g`, `zfsutils-linux` (optional), `pvesm`/`qm` (on PVE).
 
-## Enterprise themes
+## REST API summary
 
-| ID | Name |
-|----|------|
-| `midnight-enterprise` | Midnight Enterprise (Raven Midnight palette) |
-| `slate-pro` | Slate Pro |
-| `azure-horizon` | Azure Horizon |
-| `forest-admin` | Forest Admin |
-| `ruby-executive` | Ruby Executive |
-
-Themes are defined in `lpmr-core` and applied in both web CSS variables and TUI colors.
-
-## Raven GUI (optional native)
-
-[Raven](https://github.com/oscar-soirey/Raven) provides a Vulkan/XML docked desktop UI. LPMR mirrors that **workspace metaphor** in web and TUI. A future optional feature can embed `raven-gui` XMLC panels on workstations with Raven libraries installed; this repository focuses on the lightweight Rust web + terminal stack for servers and Proxmox nodes.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Liveness |
+| GET | `/api/telemetry` | Host + engine metadata |
+| GET | `/api/devices` | Block device tree |
+| GET | `/api/partitions?disk=` | Partition map for visualizer |
+| GET | `/api/vm-volumes` | Proxmox VM disks |
+| GET | `/api/zfs/pools` | ZFS pool list |
+| GET | `/api/health-audit` | Toolchain audit |
+| POST | `/api/jobs/convert` | Start conversion job |
+| GET | `/api/jobs/:id` | Job status & logs |
+| POST | `/api/operations` | Partition/mount/format/LUKS/LVM/image ops |
 
 ## Project layout
 
 ```
-crates/lpmr-core   # Storage operations, i18n, themes
-crates/lpmr-web    # Axum REST + static web UI
-crates/lpmr-tui    # Ratatui terminal panel
-crates/lpmr-cli    # `lpmr` binary (web | tui | doctor | tools | bench)
-assets/web/        # Web shell (Raven-inspired layout)
-scripts/           # Dependency installer
-docs/images/       # README diagrams
+start.sh                 # One-shot launcher
+crates/lpmr-core         # Storage, ZFS, telemetry, jobs helpers
+crates/lpmr-web          # Axum API + static orchestrator UI
+crates/lpmr-tui          # Terminal UI
+crates/lpmr-cli          # `lpmr` binary
+assets/web/              # Orchestrator CSS/JS
+docs/images/             # Screenshots & diagrams
 ```
 
 ## Security
 
-- Run with root only when performing real mutations; use dry-run first.
-- The web server binds to localhost by default — put a reverse proxy with auth in front for remote access.
+- Bind defaults to `0.0.0.0:8787` in `./start.sh` — use firewall or `127.0.0.1` on untrusted networks.
+- Destructive actions default to **dry-run**. Run the panel as root only when executing real mutations.
 
 ## License
 
