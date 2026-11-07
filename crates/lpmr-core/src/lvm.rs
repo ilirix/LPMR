@@ -2,6 +2,10 @@ use crate::tools::run_command_ok;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+pub fn lvm_available() -> bool {
+    which::which("pvs").is_ok()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhysicalVolume {
     pub name: String,
@@ -37,6 +41,13 @@ pub struct LvmSnapshot {
 }
 
 pub fn scan_lvm() -> Result<LvmSnapshot> {
+    if !lvm_available() {
+        return Ok(LvmSnapshot {
+            pvs: Vec::new(),
+            vgs: Vec::new(),
+            lvs: Vec::new(),
+        });
+    }
     let pvs = parse_pvs(run_command_ok("pvs", &["--noheadings", "-o", "pv_name,vg_name,pv_size,pv_free"])?);
     let vgs = parse_vgs(run_command_ok("vgs", &["--noheadings", "-o", "vg_name,vg_size,vg_free,pv_count,lv_count"])?);
     let lvs = parse_lvs(run_command_ok(

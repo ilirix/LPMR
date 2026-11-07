@@ -8,7 +8,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use lpmr_core::devices::{scan_block_devices, BlockDeviceTree};
 use lpmr_core::i18n::{Language, translate};
-use lpmr_core::lvm::scan_lvm;
+use lpmr_core::lvm::{lvm_available, scan_lvm};
 use lpmr_core::ops::{execute, OperationKind, OperationRequest};
 use lpmr_core::partition_map::partition_map_for_disk;
 use lpmr_core::proxmox::{is_proxmox_node, list_storages, list_storage_volumes};
@@ -44,6 +44,8 @@ struct OpBody {
     mount_point: Option<String>,
     vg: Option<String>,
     lv: Option<String>,
+    fstype: Option<lpmr_core::filesystems::FilesystemKind>,
+    image_format: Option<QemuFormat>,
 }
 
 pub fn api_router() -> Router<AppState> {
@@ -87,7 +89,12 @@ async fn devices() -> Result<Json<serde_json::Value>, AppError> {
 
 async fn lvm() -> Result<Json<serde_json::Value>, AppError> {
     let snap = scan_lvm()?;
-    Ok(Json(json!(snap)))
+    Ok(Json(json!({
+        "available": lvm_available(),
+        "pvs": snap.pvs,
+        "vgs": snap.vgs,
+        "lvs": snap.lvs,
+    })))
 }
 
 async fn tools() -> Json<serde_json::Value> {
@@ -220,7 +227,7 @@ async fn job_convert(
     State(state): State<AppState>,
     Json(body): Json<ConvertJobRequest>,
 ) -> Json<serde_json::Value> {
-    let mut record = spawn_convert(body.clone()).await;
+    let record = spawn_convert(body.clone()).await;
     let id = record.id.clone();
     state.jobs.write().await.insert(id.clone(), record.clone());
     if !record.dry_run {
@@ -271,7 +278,7 @@ async fn run_operation(Json(body): Json<OpBody>) -> Result<Json<serde_json::Valu
         path: body.path,
         target: body.target,
         size: body.size,
-        fstype: None,
+        fstype: body.fstype,
         partition_table: None,
         start: None,
         end: None,
@@ -279,7 +286,7 @@ async fn run_operation(Json(body): Json<OpBody>) -> Result<Json<serde_json::Valu
         options: None,
         source: body.source,
         dest: body.dest,
-        image_format: None,
+        image_format: body.image_format,
         vg: body.vg,
         lv: body.lv,
         luks_name: None,
@@ -302,11 +309,11 @@ async fn index(State(state): State<AppState>, Query(q): Query<LangQuery>) -> Htm
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{title}</title>
-  <link rel="stylesheet" href="/assets/app.css?v=5"/>
+  <link rel="stylesheet" href="/assets/app.css?v=6"/>
 </head>
 <body>
   <div id="app" data-lang="{}" data-theme="orange"></div>
-  <script src="/assets/app.js?v=5"></script>
+  <script src="/assets/app.js?v=6"></script>
 </body>
 </html>"#,
         lang.code(),

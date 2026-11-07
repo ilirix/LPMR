@@ -1,9 +1,12 @@
 /**
  * LPMR — Proxmox VE Storage Orchestrator (Raven // Baremetal UI)
  */
+const BUILTIN_UI_THEMES = new Set(["orange", "obsidian", "arctic"]);
+
 const state = {
   view: "disks",
   uiTheme: localStorage.getItem("lpmr.ui-theme") || "orange",
+  enterpriseThemes: [],
   selectedDisk: null,
   telemetry: null,
   devices: [],
@@ -54,13 +57,49 @@ function paintTerminal() {
     .join("");
 }
 
+function applyEnterprisePalette(theme) {
+  const root = document.documentElement;
+  root.style.setProperty("--bg", theme.window);
+  root.style.setProperty("--panel", theme.panel);
+  root.style.setProperty("--panel2", theme.panel);
+  root.style.setProperty("--border", theme.border);
+  root.style.setProperty("--text", theme.text);
+  root.style.setProperty("--accent", theme.accent);
+  root.style.setProperty("--accent2", theme.accent);
+  root.style.setProperty("--green", theme.success);
+  root.style.setProperty("--rose", theme.danger);
+}
+
 function setTheme(t) {
   state.uiTheme = t;
   localStorage.setItem("lpmr.ui-theme", t);
-  document.documentElement.setAttribute("data-ui-theme", t);
+  const root = document.documentElement;
+  if (BUILTIN_UI_THEMES.has(t)) {
+    root.removeAttribute("style");
+    root.setAttribute("data-ui-theme", t);
+  } else {
+    const ent = state.enterpriseThemes.find((th) => th.id === t);
+    root.setAttribute("data-ui-theme", "custom");
+    if (ent) applyEnterprisePalette(ent);
+  }
   document.querySelectorAll(".theme-switch button").forEach((b) => {
     b.classList.toggle("on", b.dataset.theme === t);
   });
+}
+
+function themeButtonsHtml() {
+  const builtins = [
+    ["orange", "Orange"],
+    ["obsidian", "Obsidian"],
+    ["arctic", "Arctic"],
+  ];
+  const ent = (state.enterpriseThemes || []).map((th) => [th.id, th.name]);
+  return [...builtins, ...ent]
+    .map(
+      ([id, label]) =>
+        `<button type="button" data-theme="${esc(id)}" class="${state.uiTheme === id ? "on" : ""}">${esc(label)}</button>`
+    )
+    .join("");
 }
 
 function render() {
@@ -98,11 +137,7 @@ function render() {
         <button type="button" class="nav-link" id="openVhdx">VHDX Convert & Resize</button>
         <button type="button" class="nav-link" id="openRaw">RAW / QCOW2 Pipeline</button>
         <h4>UI</h4>
-        <div class="theme-switch">
-          <button type="button" data-theme="orange" class="${state.uiTheme === "orange" ? "on" : ""}">Orange</button>
-          <button type="button" data-theme="obsidian" class="${state.uiTheme === "obsidian" ? "on" : ""}">Obsidian</button>
-          <button type="button" data-theme="arctic" class="${state.uiTheme === "arctic" ? "on" : ""}">Arctic</button>
-        </div>
+        <div class="theme-switch">${themeButtonsHtml()}</div>
       </aside>
       <main class="col-main" id="mainView"></main>
       <aside class="col-rail">
@@ -151,10 +186,20 @@ function bind() {
 function paintTools() {
   const grid = document.getElementById("toolGrid");
   if (!grid) return;
-  const list = state.health?.tools_ok || state.tools.map((t) => ({ name: t.name, ok: true }));
-  grid.innerHTML = (list || [])
-    .slice(0, 12)
-    .map((t) => `<div class="tool-chip ok"><span>${esc(t.name)}</span><span>OK</span></div>`)
+  const ok = (state.health?.tools_ok || []).slice(0, 8);
+  const miss = (state.health?.tools_missing || []).slice(0, 8);
+  let chips = [
+    ...ok.map((t) => ({ name: t.name, ok: true })),
+    ...miss.map((t) => ({ name: t.name, ok: false })),
+  ];
+  if (!chips.length) {
+    chips = state.tools.slice(0, 12).map((t) => ({ name: t.name, ok: true }));
+  }
+  grid.innerHTML = chips
+    .map(
+      (t) =>
+        `<div class="tool-chip ${t.ok ? "ok" : "err"}"><span>${esc(t.name)}</span><span>${t.ok ? "OK" : "MISS"}</span></div>`
+    )
     .join("");
 }
 
@@ -262,7 +307,10 @@ function bindMain() {
     };
   });
   document.querySelectorAll("[data-op]").forEach((el) => {
-    el.onclick = () => runOp(el.dataset.op);
+    el.onclick = () => {
+      if (el.dataset.op === "ConvertImage") openModal("raw");
+      else runOp(el.dataset.op);
+    };
   });
   document.querySelectorAll("[data-convert]").forEach((el) => {
     el.onclick = () => { state.convertSource = el.dataset.convert; openModal("vhdx"); };
@@ -314,14 +362,15 @@ function renderModal() {
           <button type="button" class="btn btn-sm" id="modalClose">✕</button>
         </div>
         <div class="modal-body form">
-          <label>Source path<input id="mSource" value="${esc(state.convertSource || "")}" placeholder="/path/source.vhdx"/></label>
-          <label>Destination<input id="mDest" placeholder="/var/lib/vz/images/out.qcow2"/></label>
-          <label>Output format<select id="mFmt"><option>qcow2</option><option>raw</option><option>vmdk</option></select></label>
+          ${state.modal !== "create" ? `<label>Source path<input id="mSource" value="${esc(state.convertSource || "")}" placeholder="/path/source.vhdx"/></label>` : ""}
+          <label>${state.modal === "create" ? "Image path" : "Destination"}<input id="mDest" placeholder="${state.modal === "create" ? "/var/lib/vz/images/new.qcow2" : "/var/lib/vz/images/out.qcow2"}"/></label>
+          ${state.modal === "create" ? `<label>Size<input id="mSize" value="32G" placeholder="32G"/></label>` : ""}
+          <label>Output format<select id="mFmt"><option>qcow2</option><option>raw</option><option>vmdk</option><option>vhdx</option></select></label>
           <label><input type="checkbox" id="mDry" ${state.dryRun ? "checked" : ""}/> Dry-run (recommended)</label>
           ${state.jobId ? `<div class="progress-bar"><div class="progress-fill" style="width:${state.jobPct}%"></div></div>` : ""}
           <div class="btn-row" style="margin-top:16px">
             <button type="button" class="btn" id="modalCancel">Cancel</button>
-            <button type="button" class="btn btn-primary" id="modalRun">Start conversion</button>
+            <button type="button" class="btn btn-primary" id="modalRun">${state.modal === "create" ? "Create image" : "Start conversion"}</button>
           </div>
         </div>
       </div>
@@ -339,11 +388,42 @@ function renderModal() {
 }
 
 async function submitJob() {
-  const source = document.getElementById("mSource")?.value?.trim();
   const dest = document.getElementById("mDest")?.value?.trim();
   const format = document.getElementById("mFmt")?.value || "qcow2";
-  if (!source || !dest) { log("Source and destination required", "warn"); return; }
   const dry = document.getElementById("mDry")?.checked ?? true;
+  state.dryRun = dry;
+
+  if (state.modal === "create") {
+    if (!dest) {
+      log("Image path required", "warn");
+      return;
+    }
+    const size = document.getElementById("mSize")?.value?.trim() || "32G";
+    try {
+      const r = await api("/api/operations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "CreateImage",
+          dry_run: dry,
+          path: dest,
+          size,
+          image_format: format,
+        }),
+      });
+      log(r.command, r.message === "dry-run" ? "warn" : "info");
+      closeModal();
+    } catch (e) {
+      log(e.message, "warn");
+    }
+    return;
+  }
+
+  const source = document.getElementById("mSource")?.value?.trim();
+  if (!source || !dest) {
+    log("Source and destination required", "warn");
+    return;
+  }
   try {
     const job = await api("/api/jobs/convert", {
       method: "POST",
@@ -382,14 +462,15 @@ async function refresh() {
   state.devices = dev.devices || [];
   if (!state.selectedDisk && state.devices[0]) state.selectedDisk = state.devices[0].path;
   state.tools = (await api("/api/tools")).tools || [];
+  state.enterpriseThemes = (await api("/api/themes")).themes || [];
   state.health = await api("/api/health-audit");
   state.zfs = await api("/api/zfs/pools");
   state.vmVolumes = (await api("/api/vm-volumes")).volumes || [];
   await loadPartitionMap();
   paintTools();
-  document.querySelectorAll(".metric-pill strong");
   render();
   bind();
+  setTheme(state.uiTheme);
   log("Refresh complete", "info");
 }
 
