@@ -60,7 +60,7 @@ impl Language {
 type Table = &'static [(&'static str, &'static str)];
 
 const EN: Table = &[
-    ("app.title", "LPMR Storage Panel"),
+    ("app.title", "Proxmox VE Storage Orchestrator"),
     ("nav.dashboard", "Dashboard"),
     ("nav.devices", "Devices"),
     ("nav.devices.sub", "Local disks & partitions"),

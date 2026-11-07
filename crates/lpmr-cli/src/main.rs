@@ -13,6 +13,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Start web orchestrator (same as `web`, default 0.0.0.0:8787)
+    Start {
+        #[arg(long, default_value = "0.0.0.0:8787")]
+        bind: String,
+    },
     /// Launch the terminal panel (Ratatui, Raven-inspired dock layout)
     Tui,
     /// Launch the web panel (Axum)
@@ -40,6 +45,12 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
+        Commands::Start { bind } => {
+            let addr: SocketAddr = bind.parse()?;
+            let root = workspace_root();
+            std::env::set_current_dir(&root)?;
+            lpmr_web::serve(addr, root.join("assets")).await?;
+        }
         Commands::Tui => lpmr_tui::run_tui()?,
         Commands::Web { bind } => {
             let addr: SocketAddr = bind.parse()?;

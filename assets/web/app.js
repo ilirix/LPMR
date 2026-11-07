@@ -1,665 +1,406 @@
-/** LPMR Web UI — layout aligned with OpenZFS Enterprise Director */
-
-const LANG_OPTIONS = [
-  { code: "en", name: "English", native: "English", flag: "🇬🇧" },
-  { code: "es", name: "Spanish", native: "Español", flag: "🇪🇸" },
-  { code: "zh", name: "Chinese", native: "简体中文", flag: "🇨🇳" },
-  { code: "hi", name: "Hindi", native: "हिन्दी", flag: "🇮🇳" },
-  { code: "fr", name: "French", native: "Français", flag: "🇫🇷" },
-  { code: "ar", name: "Arabic", native: "العربية", flag: "🇸🇦", dir: "rtl" },
-];
-
-const NAV = [
-  { id: "dashboard", labelKey: "nav.dashboard", sub: "Overview & health", icon: "grid" },
-  { id: "devices", labelKey: "nav.devices", subKey: "nav.devices.sub", icon: "disk" },
-  { id: "lvm", labelKey: "nav.lvm", sub: "Volume groups & logical volumes", icon: "layers" },
-  { id: "images", labelKey: "nav.images", sub: "RAW · QCOW2 · VMDK", icon: "box" },
-  { id: "proxmox", labelKey: "nav.proxmox", sub: "pvesm storages & volumes", icon: "server" },
-  { id: "tools", labelKey: "nav.tools", sub: "Installed system utilities", icon: "wrench" },
-  { id: "logs", labelKey: "panel.log", sub: "Operation history", icon: "scroll" },
-];
-
-const ICONS = {
-  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
-  disk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
-  layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>',
-  box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>',
-  server: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>',
-  wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
-  scroll: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 1 1-4 0V5a2 2 0 0 0-2-2H4"/><path d="M8 21V5a2 2 0 0 1 2-2h9"/></svg>',
-  settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>',
-  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>',
-};
-
+/**
+ * LPMR — Proxmox VE Storage Orchestrator (Raven // Baremetal UI)
+ */
 const state = {
-  lang: localStorage.getItem("lpmr.lang") || "en",
-  theme: localStorage.getItem("lpmr.theme") || "slate-pro",
-  tab: "dashboard",
-  selected: null,
-  strings: {},
-  themes: [],
+  view: "disks",
+  uiTheme: localStorage.getItem("lpmr.ui-theme") || "orange",
+  selectedDisk: null,
+  telemetry: null,
   devices: [],
-  lvm: null,
+  partitionMap: null,
+  vmVolumes: [],
+  zfs: { available: false, pools: [] },
+  health: null,
   tools: [],
-  proxmox: null,
-  proxmoxSelected: null,
-  imagePath: "",
-  imageInfo: null,
   dryRun: true,
   log: [],
-  refreshing: false,
-  settingsOpen: false,
-  langMenuOpen: false,
-  mobileNavOpen: false,
-  toast: null,
+  modal: null,
+  jobId: null,
+  jobPct: 0,
+  search: "",
 };
 
-function t(key) {
-  return state.strings[key] || key;
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 }
 
-function navLabel(item) {
-  if (item.labelKey.startsWith("nav.")) return t(item.labelKey);
-  return t(item.labelKey);
-}
-
-function navSub(item) {
-  if (item.subKey) return t(item.subKey);
-  return item.sub || "";
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/"/g, "&quot;");
-}
-
-function formatBytes(bytes) {
-  if (bytes == null || Number.isNaN(bytes)) return "—";
-  const n = Number(bytes);
-  if (n === 0) return "0 B";
-  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
-  let v = n;
-  let u = 0;
-  while (v >= 1024 && u < units.length - 1) {
-    v /= 1024;
-    u += 1;
-  }
-  return u === 0 ? `${n} ${units[u]}` : `${v.toFixed(2)} ${units[u]}`;
-}
-
-function applyTheme(themeOrId) {
-  const theme =
-    typeof themeOrId === "object"
-      ? themeOrId
-      : state.themes.find((x) => x.id === themeOrId) || state.themes[0];
-  if (!theme) return;
-  const root = document.documentElement;
-  root.style.setProperty("--oed-bg", theme.window);
-  root.style.setProperty("--oed-sidebar", theme.window);
-  root.style.setProperty("--oed-header", theme.panel);
-  root.style.setProperty("--oed-card", theme.panel);
-  root.style.setProperty("--oed-accent", theme.accent);
-  root.style.setProperty("--oed-accent-soft", `${theme.accent}26`);
-  root.style.setProperty("--oed-accent-border", `${theme.accent}55`);
-  root.style.setProperty("--oed-text", theme.text);
-  state.theme = theme.id;
-  localStorage.setItem("lpmr.theme", theme.id);
+function fmt(b) {
+  if (!b) return "0 B";
+  const u = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let v = b, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return i ? `${v.toFixed(2)} ${u[i]}` : `${b} ${u[0]}`;
 }
 
 async function api(path, opts) {
-  const res = await fetch(path, opts);
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    throw new Error(res.statusText || "Invalid response");
-  }
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
 }
 
-function flattenDevices(nodes, depth = 0) {
-  const out = [];
-  for (const n of nodes || []) {
-    out.push({ ...n, depth });
-    out.push(...flattenDevices(n.children, depth + 1));
-  }
-  return out;
+function log(line, cls) {
+  const ts = new Date().toLocaleTimeString();
+  state.log.unshift({ ts, line, cls });
+  state.log = state.log.slice(0, 400);
+  paintTerminal();
 }
 
-function showToast(msg) {
-  state.toast = msg;
-  renderToast();
-  setTimeout(() => {
-    state.toast = null;
-    renderToast();
-  }, 3500);
+function paintTerminal() {
+  const el = document.getElementById("termOut");
+  if (!el) return;
+  el.innerHTML = state.log
+    .map((l) => `<div class="line-${l.cls || "info"}">[${esc(l.ts)}] ${esc(l.line)}</div>`)
+    .join("");
 }
 
-function renderToast() {
-  let el = document.getElementById("lpmrToast");
-  if (!state.toast) {
-    if (el) el.remove();
-    return;
-  }
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "lpmrToast";
-    el.className = "toast";
-    document.body.appendChild(el);
-  }
-  el.textContent = state.toast;
+function setTheme(t) {
+  state.uiTheme = t;
+  localStorage.setItem("lpmr.ui-theme", t);
+  document.documentElement.setAttribute("data-ui-theme", t);
+  document.querySelectorAll(".theme-switch button").forEach((b) => {
+    b.classList.toggle("on", b.dataset.theme === t);
+  });
 }
 
-function tabTitle() {
-  const item = NAV.find((n) => n.id === state.tab);
-  if (!item) return t("app.title");
-  return `${navLabel(item)} — ${navSub(item)}`;
-}
-
-function deviceCount() {
-  return flattenDevices(state.devices).length;
-}
-
-function renderShell() {
+function render() {
+  const host = state.telemetry?.host;
   const app = document.getElementById("app");
-  if (!app) return;
-  const langMeta = LANG_OPTIONS.find((l) => l.code === state.lang) || LANG_OPTIONS[0];
-  const flatCount = deviceCount();
-
   app.innerHTML = `
-    <div class="mobile-backdrop ${state.mobileNavOpen ? "open" : ""}" id="mobileBackdrop"></div>
-    <div class="app-shell">
-      <aside class="sidebar ${state.mobileNavOpen ? "open" : ""}" id="sidebar">
-        <div class="sidebar-brand">
-          <div class="brand-row">
-            <div style="display:flex;align-items:center;gap:0.65rem">
-              <div class="brand-logo">${ICONS.layers}</div>
-              <div>
-                <div class="brand-title">LPMR <span class="brand-badge">Enterprise</span></div>
-                <p class="brand-sub">Linux Storage Director</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <nav class="sidebar-nav" aria-label="Main">
-          ${NAV.map(
-            (item) => `
-            <button type="button" class="nav-item ${state.tab === item.id ? "active" : ""}" data-tab="${item.id}">
-              ${ICONS[item.icon] || ""}
-              <div>
-                <div class="nav-label">${escapeHtml(navLabel(item))}</div>
-                <div class="nav-sub">${escapeHtml(navSub(item))}</div>
-              </div>
-            </button>`
-          ).join("")}
-        </nav>
-        <div class="sidebar-footer">
-          <div class="status-card">
-            <div class="status-row">
-              <span style="color:var(--oed-muted)">Engine</span>
-              <span class="status-pill">Rust Axum</span>
-            </div>
-            <div class="status-row" style="color:var(--oed-muted-dim);font-family:var(--font-mono)">
-              <span>Tools</span><span>${state.tools.length} installed</span>
-            </div>
-          </div>
+    <header class="top-brand">
+      <span class="badge-raven">RAVEN // BAREMETAL</span>
+      <h1>PROXMOX VE STORAGE ORCHESTRATOR</h1>
+      <div class="grow"></div>
+      <input type="search" id="globalSearch" placeholder="Search nodes, pools, disks, VM images…" value="${esc(state.search)}"/>
+      <button type="button" class="btn btn-ghost" id="btnTui">Open Terminal</button>
+      <button type="button" class="btn btn-primary" id="btnCreateVol">+ Create Volume</button>
+    </header>
+    <nav class="tab-bar" id="tabBar">
+      ${["disks", "vmimages", "zfs", "health"].map((v) => `
+        <button type="button" data-view="${v}" class="${state.view === v ? "active" : ""}">${
+          { disks: "Disks", vmimages: "VM Images", zfs: "ZFS Pools", health: "Health Audit" }[v]
+        }</button>`).join("")}
+    </nav>
+    <div class="metrics">
+      <span class="metric-pill ok"><strong>${esc(host?.hostname || "node")}</strong> ONLINE · ${esc(host?.kernel || "linux")}</span>
+      <span class="metric-pill"><strong>Rust RSS</strong> ${(host?.rss_mb ?? 0).toFixed(1)} MB</span>
+      <span class="metric-pill"><strong>Devices</strong> ${state.devices.length}</span>
+      <span class="metric-pill"><strong>Tools</strong> ${state.tools.length}</span>
+      <span class="metric-pill"><strong>Dry-run</strong> ${state.dryRun ? "ON" : "OFF"}</span>
+    </div>
+    <div class="workspace">
+      <aside class="col-nav">
+        <h4>Storage infrastructure</h4>
+        <button type="button" class="nav-link on" data-goto="disks">Block Devices & NVMe</button>
+        <button type="button" class="nav-link" data-goto="vmimages">Proxmox VM Volumes</button>
+        <button type="button" class="nav-link" data-goto="zfs">ZFS Pools & Datasets</button>
+        <h4>Operations</h4>
+        <button type="button" class="nav-link" id="openVhdx">VHDX Convert & Resize</button>
+        <button type="button" class="nav-link" id="openRaw">RAW / QCOW2 Pipeline</button>
+        <h4>UI</h4>
+        <div class="theme-switch">
+          <button type="button" data-theme="orange" class="${state.uiTheme === "orange" ? "on" : ""}">Orange</button>
+          <button type="button" data-theme="obsidian" class="${state.uiTheme === "obsidian" ? "on" : ""}">Obsidian</button>
+          <button type="button" data-theme="arctic" class="${state.uiTheme === "arctic" ? "on" : ""}">Arctic</button>
         </div>
       </aside>
-      <div class="main-col">
-        <header class="top-header">
-          <div class="header-left">
-            <button type="button" class="btn btn-icon btn-ghost menu-toggle" id="menuBtn" aria-label="Menu">${ICONS.grid}</button>
-            <span class="header-crumb">Storage Node</span>
-            <span class="header-crumb">/</span>
-            <h1 class="header-title">${escapeHtml(tabTitle())}</h1>
-            <span class="header-badge">${flatCount} devices</span>
-          </div>
-          <div class="header-actions">
-            <div class="lang-menu" id="langMenu">
-              <button type="button" class="btn" id="langBtn">
-                <span>${langMeta.flag}</span>
-                <span class="mono" style="font-size:11px">${langMeta.code.toUpperCase()}</span>
-              </button>
-              <div class="lang-dropdown" id="langDropdown" style="display:${state.langMenuOpen ? "block" : "none"}">
-                <div class="lang-dropdown-head">${escapeHtml(t("lang.label"))}</div>
-                ${LANG_OPTIONS.map(
-                  (l) => `
-                  <button type="button" class="lang-option ${l.code === state.lang ? "active" : ""}" data-lang="${l.code}">
-                    <span>${l.flag} ${escapeHtml(l.native)}</span>
-                    ${l.code === state.lang ? "✓" : ""}
-                  </button>`
-                ).join("")}
-              </div>
-            </div>
-            <button type="button" class="btn btn-sky" id="settingsBtn">${ICONS.settings}<span class="hide-sm">Settings</span></button>
-            <button type="button" class="btn btn-icon btn-ghost" id="refreshBtn" title="${escapeHtml(t("action.refresh"))}" ${state.refreshing ? "disabled" : ""}>
-              ${ICONS.refresh}
-            </button>
-          </div>
-        </header>
-        <div class="banner-warn">${escapeHtml(t("warn.privilege"))}</div>
-        <main class="viewport" id="viewport"></main>
-      </div>
+      <main class="col-main" id="mainView"></main>
+      <aside class="col-rail">
+        <div class="rail-section">
+          <h4>System toolchain & CLI audit</h4>
+          <div class="tool-grid" id="toolGrid"></div>
+        </div>
+        <div class="rail-section" style="flex:1;display:flex;flex-direction:column;min-height:0;border:none">
+          <h4>Integrated log (raven-tui)</h4>
+          <div class="terminal" id="termOut"></div>
+        </div>
+      </aside>
     </div>
     <div id="modalRoot"></div>`;
 
-  document.querySelectorAll(".nav-item").forEach((el) => {
-    el.onclick = () => {
-      state.tab = el.dataset.tab;
-      state.mobileNavOpen = false;
-      document.querySelectorAll(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.tab === state.tab));
-      document.getElementById("sidebar")?.classList.remove("open");
-      document.getElementById("mobileBackdrop")?.classList.remove("open");
-      document.querySelector(".header-title").textContent = tabTitle();
-      renderViewport();
-    };
+  document.querySelectorAll("#tabBar button").forEach((b) => {
+    b.onclick = () => { state.view = b.dataset.view; render(); bind(); paintMain(); };
   });
-  document.getElementById("menuBtn")?.addEventListener("click", () => {
-    state.mobileNavOpen = !state.mobileNavOpen;
-    document.getElementById("sidebar")?.classList.toggle("open", state.mobileNavOpen);
-    document.getElementById("mobileBackdrop")?.classList.toggle("open", state.mobileNavOpen);
+  document.querySelectorAll("[data-goto]").forEach((b) => {
+    b.onclick = () => { state.view = b.dataset.goto; render(); bind(); paintMain(); };
   });
-  document.getElementById("mobileBackdrop")?.addEventListener("click", () => {
-    state.mobileNavOpen = false;
-    document.getElementById("sidebar")?.classList.remove("open");
-    document.getElementById("mobileBackdrop")?.classList.remove("open");
+  document.getElementById("btnTui").onclick = () => {
+    log("Run on host: lpmr tui", "warn");
+    alert("Native terminal UI: run `lpmr tui` on the Proxmox/Linux host.");
+  };
+  document.getElementById("btnCreateVol").onclick = () => openModal("create");
+  document.getElementById("openVhdx").onclick = () => openModal("vhdx");
+  document.getElementById("openRaw").onclick = () => openModal("raw");
+  document.querySelectorAll(".theme-switch button").forEach((b) => {
+    b.onclick = () => setTheme(b.dataset.theme);
   });
-  document.getElementById("refreshBtn")?.addEventListener("click", () => refreshAll());
-  document.getElementById("settingsBtn")?.addEventListener("click", () => {
-    state.settingsOpen = true;
-    renderModal();
-  });
-  document.getElementById("langBtn")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    state.langMenuOpen = !state.langMenuOpen;
-    const dd = document.getElementById("langDropdown");
-    if (dd) dd.style.display = state.langMenuOpen ? "block" : "none";
-  });
-  document.querySelectorAll(".lang-option").forEach((el) => {
-    el.onclick = async () => {
-      state.lang = el.dataset.lang;
-      state.langMenuOpen = false;
-      localStorage.setItem("lpmr.lang", state.lang);
-      const meta = LANG_OPTIONS.find((l) => l.code === state.lang);
-      document.documentElement.dir = meta?.dir || "ltr";
-      await loadI18n();
-      renderShell();
-      renderViewport();
-      bindGlobalClick();
-    };
-  });
-  renderViewport();
+  document.getElementById("globalSearch").oninput = (e) => {
+    state.search = e.target.value.toLowerCase();
+    paintMain();
+  };
+  paintTools();
+  paintMain();
+  paintTerminal();
+  renderModal();
 }
 
-function bindGlobalClick() {
-  document.addEventListener("click", () => {
-    if (state.langMenuOpen) {
-      state.langMenuOpen = false;
-      const dd = document.getElementById("langDropdown");
-      if (dd) dd.style.display = "none";
-    }
+function bind() {
+  setTheme(state.uiTheme);
+}
+
+function paintTools() {
+  const grid = document.getElementById("toolGrid");
+  if (!grid) return;
+  const list = state.health?.tools_ok || state.tools.map((t) => ({ name: t.name, ok: true }));
+  grid.innerHTML = (list || [])
+    .slice(0, 12)
+    .map((t) => `<div class="tool-chip ok"><span>${esc(t.name)}</span><span>OK</span></div>`)
+    .join("");
+}
+
+function paintMain() {
+  const main = document.getElementById("mainView");
+  if (!main) return;
+  if (state.view === "disks") main.innerHTML = viewDisks();
+  else if (state.view === "vmimages") main.innerHTML = viewVm();
+  else if (state.view === "zfs") main.innerHTML = viewZfs();
+  else main.innerHTML = viewHealth();
+  bindMain();
+}
+
+function filterDisks(devs) {
+  if (!state.search) return devs;
+  return devs.filter((d) => JSON.stringify(d).toLowerCase().includes(state.search));
+}
+
+function viewDisks() {
+  const disks = filterDisks(state.devices);
+  const map = state.partitionMap;
+  const segs = map?.segments || [];
+  return `
+    <div class="card">
+      <div class="card-head">Partition allocation visualizer</div>
+      <div class="card-body">
+        <div style="font-family:var(--mono);font-size:12px;margin-bottom:8px">
+          ${esc(map?.disk_path || state.selectedDisk || "—")} ${map?.model ? "· " + esc(map.model) : ""}
+          ${map ? `· ${fmt(map.size_bytes)}` : ""}
+        </div>
+        <div class="part-bar">${segs.length ? segs.map((s) => `
+          <div class="part-seg" style="width:${Math.max(s.pct, 3)}%" title="${esc(s.path)}">${esc(s.name)}</div>`).join("") : `<div class="part-seg" style="width:100%;background:var(--panel)">No partitions</div>`}
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn btn-sm" data-op="Mount">Mount</button>
+          <button type="button" class="btn btn-sm" data-op="FormatFilesystem">Format</button>
+          <button type="button" class="btn btn-sm" data-op="Unmount">Unmount</button>
+          <button type="button" class="btn btn-sm btn-primary" data-op="ConvertImage">Convert image</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">Block devices</div>
+      <div class="card-body">
+        ${disks.map((d) => `
+          <button type="button" class="btn btn-ghost" style="width:100%;margin-bottom:6px;text-align:left" data-disk="${esc(d.path)}">
+            <strong>${esc(d.name)}</strong> <span style="color:var(--muted)">${fmt(d.size_bytes)}</span>
+          </button>`).join("") || "<p style='color:var(--muted)'>No devices</p>"}
+      </div>
+    </div>`;
+}
+
+function viewVm() {
+  const rows = (state.vmVolumes || []).filter((v) => !state.search || JSON.stringify(v).toLowerCase().includes(state.search));
+  return `
+    <div class="card">
+      <div class="card-head">Proxmox VE & KVM volume orchestrator</div>
+      <div class="card-body" style="padding:0">
+        <table class="table">
+          <thead><tr><th>VolID</th><th>Format</th><th>Size</th><th>Storage</th><th></th></tr></thead>
+          <tbody>
+            ${rows.length ? rows.map((v) => `
+              <tr>
+                <td>${esc(v.volid)}</td><td>${esc(v.format)}</td><td>${esc(v.size)}</td><td>${esc(v.storage)}</td>
+                <td><button type="button" class="btn btn-sm" data-convert="${esc(v.volid)}">Convert</button></td>
+              </tr>`).join("") : `<tr><td colspan="5" style="color:var(--muted)">No VM volumes (not on PVE or empty)</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function viewZfs() {
+  const pools = state.zfs.pools || [];
+  return `
+    <div class="card">
+      <div class="card-head">ZFS pools</div>
+      <div class="card-body">
+        ${state.zfs.available ? pools.map((p) => `
+          <div style="margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:8px">
+            <strong>${esc(p.name)}</strong> <span class="badge" style="color:var(--green)">${esc(p.health)}</span><br/>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">size ${esc(p.size)} · free ${esc(p.free)}</span>
+          </div>`).join("") : `<p style="color:var(--muted)">zpool not available — install zfsutils-linux</p>`}
+      </div>
+    </div>`;
+}
+
+function viewHealth() {
+  const h = state.health;
+  if (!h) return `<p class="empty">Loading…</p>`;
+  return `
+    <div class="modal-grid">
+      <div class="card"><div class="card-head">Devices</div><div class="card-body">${h.device_count} top-level block devices</div></div>
+      <div class="card"><div class="card-head">Proxmox</div><div class="card-body">${h.proxmox ? "pvesm detected" : "Not a PVE node"}</div></div>
+      <div class="card"><div class="card-head">Missing tools</div><div class="card-body"><ul>${(h.tools_missing || []).map((t) => `<li>${esc(t.name)}</li>`).join("") || "<li>None</li>"}</ul></div></div>
+    </div>`;
+}
+
+function bindMain() {
+  document.querySelectorAll("[data-disk]").forEach((el) => {
+    el.onclick = async () => {
+      state.selectedDisk = el.dataset.disk;
+      await loadPartitionMap();
+      paintMain();
+    };
   });
+  document.querySelectorAll("[data-op]").forEach((el) => {
+    el.onclick = () => runOp(el.dataset.op);
+  });
+  document.querySelectorAll("[data-convert]").forEach((el) => {
+    el.onclick = () => { state.convertSource = el.dataset.convert; openModal("vhdx"); };
+  });
+}
+
+async function loadPartitionMap() {
+  if (!state.selectedDisk) return;
+  try {
+    state.partitionMap = await api(`/api/partitions?disk=${encodeURIComponent(state.selectedDisk)}`);
+  } catch (e) {
+    log(`Partition map: ${e.message}`, "warn");
+  }
+}
+
+async function runOp(kind) {
+  const device = state.selectedDisk;
+  if (!device) { log("Select a disk first", "warn"); return; }
+  try {
+    const body = { kind, dry_run: state.dryRun, device };
+    if (kind === "Mount") body.mount_point = "/mnt/lpmr";
+    const r = await api("/api/operations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    log(r.command, r.message === "dry-run" ? "warn" : "info");
+  } catch (e) {
+    log(e.message, "warn");
+  }
+}
+
+function openModal(kind) {
+  state.modal = kind;
+  renderModal();
+}
+
+function closeModal() {
+  state.modal = null;
+  renderModal();
 }
 
 function renderModal() {
   const root = document.getElementById("modalRoot");
   if (!root) return;
-  if (!state.settingsOpen) {
-    root.innerHTML = "";
-    return;
-  }
+  if (!state.modal) { root.innerHTML = ""; return; }
+  const titles = { vhdx: "HYPER-V VHDX CONVERSION & DYNAMIC RESIZING", raw: "RAW CONVERSION & NVMe-oF FABRIC PIPELINE", create: "CREATE VM VOLUME" };
   root.innerHTML = `
-    <div class="modal-backdrop" id="modalBackdrop">
-      <div class="modal" role="dialog" aria-labelledby="settingsTitle">
-        <div class="modal-head">
-          <div>
-            <h2 id="settingsTitle" style="margin:0;font-size:1rem">${escapeHtml(t("theme.label"))} & ${escapeHtml(t("lang.label"))}</h2>
-            <p style="margin:0.35rem 0 0;font-size:0.75rem;color:var(--oed-muted)">OpenZFS Enterprise Director style appearance</p>
+    <div class="modal-bg" id="modalBg">
+      <div class="modal">
+        <div class="modal-header">
+          <div><h2>${esc(titles[state.modal])}</h2><p style="margin:4px 0 0;font-size:11px;color:var(--muted)">Rust-backed · qemu-img · dry-run by default</p></div>
+          <button type="button" class="btn btn-sm" id="modalClose">✕</button>
+        </div>
+        <div class="modal-body form">
+          <label>Source path<input id="mSource" value="${esc(state.convertSource || "")}" placeholder="/path/source.vhdx"/></label>
+          <label>Destination<input id="mDest" placeholder="/var/lib/vz/images/out.qcow2"/></label>
+          <label>Output format<select id="mFmt"><option>qcow2</option><option>raw</option><option>vmdk</option></select></label>
+          <label><input type="checkbox" id="mDry" ${state.dryRun ? "checked" : ""}/> Dry-run (recommended)</label>
+          ${state.jobId ? `<div class="progress-bar"><div class="progress-fill" style="width:${state.jobPct}%"></div></div>` : ""}
+          <div class="btn-row" style="margin-top:16px">
+            <button type="button" class="btn" id="modalCancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="modalRun">Start conversion</button>
           </div>
-          <button type="button" class="btn btn-icon btn-ghost" id="closeModal">✕</button>
-        </div>
-        <div class="modal-body">
-          <p style="font-size:0.6875rem;text-transform:uppercase;color:var(--oed-muted);letter-spacing:0.06em">${escapeHtml(t("theme.label"))}</p>
-          <div class="theme-grid" style="margin:0.5rem 0 1rem">
-            ${state.themes
-              .map(
-                (th) => `
-              <button type="button" class="theme-card ${th.id === state.theme ? "active" : ""}" data-theme="${th.id}">
-                <div class="theme-card-preview" style="background:linear-gradient(135deg,${th.window},${th.accent})"></div>
-                <div class="theme-card-name">${escapeHtml(th.name)}</div>
-              </button>`
-              )
-              .join("")}
-          </div>
-          <button type="button" class="btn btn-primary" id="closeModal2">Done</button>
         </div>
       </div>
     </div>`;
-  const close = () => {
-    state.settingsOpen = false;
-    renderModal();
-  };
-  document.getElementById("modalBackdrop")?.addEventListener("click", (e) => {
-    if (e.target.id === "modalBackdrop") close();
-  });
-  const closeBtn = document.getElementById("closeModal");
-  const closeBtn2 = document.getElementById("closeModal2");
-  if (closeBtn) closeBtn.onclick = close;
-  if (closeBtn2) closeBtn2.onclick = close;
-  document.querySelectorAll(".theme-card").forEach((el) => {
-    el.onclick = () => {
-      applyTheme(el.dataset.theme);
-      document.querySelectorAll(".theme-card").forEach((c) => c.classList.toggle("active", c.dataset.theme === state.theme));
-      showToast(`Theme: ${state.themes.find((x) => x.id === state.theme)?.name || state.theme}`);
-    };
-  });
+  const bg = document.getElementById("modalBg");
+  const closeBtn = document.getElementById("modalClose");
+  const cancelBtn = document.getElementById("modalCancel");
+  const runBtn = document.getElementById("modalRun");
+  if (bg) bg.addEventListener("click", (e) => { if (e.target.id === "modalBg") closeModal(); });
+  if (closeBtn) closeBtn.onclick = closeModal;
+  if (cancelBtn) cancelBtn.onclick = closeModal;
+  if (runBtn) runBtn.onclick = () => submitJob();
+  const dry = document.getElementById("mDry");
+  if (dry) dry.onchange = () => { state.dryRun = dry.checked; };
 }
 
-function renderViewport() {
-  const vp = document.getElementById("viewport");
-  if (!vp) return;
-  if (state.tab === "dashboard") vp.innerHTML = renderDashboard();
-  else if (state.tab === "devices") vp.innerHTML = renderDevicesView();
-  else if (state.tab === "lvm") vp.innerHTML = renderLvmView();
-  else if (state.tab === "images") vp.innerHTML = renderImagesView();
-  else if (state.tab === "proxmox") vp.innerHTML = renderProxmoxView();
-  else if (state.tab === "tools") vp.innerHTML = renderToolsView();
-  else if (state.tab === "logs") vp.innerHTML = renderLogsView();
-  bindViewportEvents();
-}
-
-function renderDashboard() {
-  const flat = flattenDevices(state.devices);
-  const vgCount = state.lvm?.vgs?.length || 0;
-  const lvCount = state.lvm?.lvs?.length || 0;
-  return `
-    <div class="grid-stats">
-      <div class="stat-card"><h3>Block devices</h3><div class="stat-value">${flat.length}</div><div class="stat-meta">Disks, partitions, loops</div></div>
-      <div class="stat-card"><h3>LVM</h3><div class="stat-value">${vgCount}<span style="font-size:0.875rem;color:var(--oed-muted)"> VG</span></div><div class="stat-meta">${lvCount} logical volumes</div></div>
-      <div class="stat-card"><h3>System tools</h3><div class="stat-value">${state.tools.length}</div><div class="stat-meta">parted · qemu-img · lvm …</div></div>
-      <div class="stat-card"><h3>Proxmox</h3><div class="stat-value">${state.proxmox?.available ? "Online" : "N/A"}</div><div class="stat-meta">${state.proxmox?.available ? (state.proxmox.storages?.length || 0) + " storages" : "pvesm not detected"}</div></div>
-    </div>
-    <div class="card">
-      <div class="card-head">Quick actions</div>
-      <div class="card-body form-row">
-        <button type="button" class="btn btn-primary" data-goto="devices">Manage devices</button>
-        <button type="button" class="btn btn-sky" data-goto="images">Inspect VM image</button>
-        <button type="button" class="btn" data-action="refresh">Refresh telemetry</button>
-      </div>
-    </div>`;
-}
-
-function renderDevicesView() {
-  const flat = flattenDevices(state.devices);
-  const dev = flat.find((d) => d.path === state.selected);
-  return `
-    <div class="split-view">
-      <div class="card">
-        <div class="card-head">${escapeHtml(t("nav.devices"))}</div>
-        <div class="card-body">
-          ${flat.length ? flat.map((d) => `
-            <button type="button" class="device-row ${state.selected === d.path ? "selected" : ""}" data-path="${escapeHtml(d.path)}" style="padding-left:${8 + d.depth * 12}px">
-              <div class="device-name">${escapeHtml(d.name)}</div>
-              <div class="device-meta">${formatBytes(d.size_bytes)} · ${escapeHtml(d.fstype || "unformatted")}</div>
-            </button>`).join("") : `<p class="empty">No devices — click Refresh</p>`}
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:0.75rem">
-        <div class="card">
-          <div class="card-head">${escapeHtml(t("panel.details"))}</div>
-          <div class="card-body">${dev ? deviceDetailHtml(dev) : `<p class="empty">Select a device</p>`}</div>
-        </div>
-        <div class="card">
-          <div class="card-head">${escapeHtml(t("nav.operations"))}</div>
-          <div class="card-body">${opsFormHtml()}</div>
-        </div>
-      </div>
-    </div>`;
-}
-
-function deviceDetailHtml(dev) {
-  return `
-    <div class="kv">
-      <div class="k">Path</div><div class="v mono">${escapeHtml(dev.path)}</div>
-      <div class="k">Size</div><div class="v">${formatBytes(dev.size_bytes)}</div>
-      <div class="k">Model</div><div class="v">${escapeHtml(dev.model || "—")}</div>
-      <div class="k">Filesystem</div><div class="v">${escapeHtml(dev.fstype || "—")}</div>
-      <div class="k">Transport</div><div class="v">${escapeHtml(dev.transport || "—")}</div>
-      <div class="k">Mount</div><div class="v">${escapeHtml((dev.mountpoints || []).filter(Boolean).join(", ") || "—")}</div>
-    </div>`;
-}
-
-function opsFormHtml() {
-  const dev = state.selected || "";
-  return `
-    <div class="form-stack">
-      <label class="checkbox-row"><input type="checkbox" id="dryRunChk" ${state.dryRun ? "checked" : ""}/> ${escapeHtml(t("action.dry_run"))}</label>
-      <label>Device<input id="opDevice" value="${escapeHtml(dev)}"/></label>
-      <label>Mount point<input id="opMount" placeholder="/mnt/data"/></label>
-      <div class="form-row">
-        <button type="button" class="btn btn-primary" id="opMountBtn">Mount</button>
-        <button type="button" class="btn" id="opUmountBtn">Unmount</button>
-      </div>
-      <label>Convert destination<input id="opDest" placeholder="/path/out.qcow2"/></label>
-      <button type="button" class="btn btn-sky" id="opConvertBtn">Convert → qcow2</button>
-    </div>`;
-}
-
-function renderLvmView() {
-  const l = state.lvm || { vgs: [], lvs: [], pvs: [] };
-  return `
-    <div class="split-view">
-      <div class="card"><div class="card-head">Volume groups</div><div class="card-body"><ul>${(l.vgs || []).map((v) => `<li class="mono">${escapeHtml(v.name)} — ${escapeHtml(v.size)} (free ${escapeHtml(v.free)})</li>`).join("") || "<li class='empty'>None</li>"}</ul></div></div>
-      <div class="card"><div class="card-head">Logical volumes</div><div class="card-body"><ul>${(l.lvs || []).map((v) => `<li class="mono">${escapeHtml(v.vg)}/${escapeHtml(v.name)} — ${escapeHtml(v.size)}</li>`).join("") || "<li class='empty'>None</li>"}</ul></div></div>
-    </div>`;
-}
-
-function renderImagesView() {
-  return `
-    <div class="split-view">
-      <div class="card">
-        <div class="card-head">${escapeHtml(t("nav.images"))}</div>
-        <div class="card-body form-stack">
-          <label>Image path<input id="imgPath" value="${escapeHtml(state.imagePath)}" placeholder="/var/lib/vz/images/100/vm-100-disk-0.qcow2"/></label>
-          <button type="button" class="btn btn-primary" id="imgInfoBtn">Inspect (qemu-img)</button>
-        </div>
-      </div>
-      <div class="card"><div class="card-head">Metadata</div><div class="card-body">${state.imageInfo ? `<pre class="mono">${escapeHtml(JSON.stringify(state.imageInfo, null, 2))}</pre>` : `<p class="empty">No image loaded</p>`}</div></div>
-    </div>`;
-}
-
-function renderProxmoxView() {
-  if (!state.proxmox?.available) {
-    return `<div class="card"><div class="card-body"><p class="empty">Not a Proxmox node — install <code>pvesm</code> or run on PVE.</p></div></div>`;
-  }
-  return `
-    <div class="split-view">
-      <div class="card"><div class="card-head">Storages</div><div class="card-body">
-        ${(state.proxmox.storages || []).map((s) => `
-          <button type="button" class="device-row" data-storage="${escapeHtml(s.name)}">
-            <div class="device-name">${escapeHtml(s.name)}</div>
-            <div class="device-meta">${escapeHtml(s.storage_type)} · ${escapeHtml(s.available)} free</div>
-          </button>`).join("")}
-      </div></div>
-      <div class="card"><div class="card-head">Volumes</div><div class="card-body">${state.proxmoxSelected ? `<pre class="mono">${escapeHtml(JSON.stringify(state.proxmoxSelected, null, 2))}</pre>` : `<p class="empty">Select a storage</p>`}</div></div>
-    </div>`;
-}
-
-function renderToolsView() {
-  return `
-    <div class="card">
-      <div class="card-head">${escapeHtml(t("nav.tools"))}</div>
-      <div class="card-body">
-        ${state.tools.length ? `<ul>${state.tools.map((tool) => `<li style="margin-bottom:0.65rem"><strong class="mono">${escapeHtml(tool.name)}</strong><br/><span class="device-meta">${escapeHtml(tool.purpose)}</span></li>`).join("")}</ul>` : `<p class="empty">Run <code>lpmr doctor</code></p>`}
-      </div>
-    </div>`;
-}
-
-function renderLogsView() {
-  return `
-    <div class="card">
-      <div class="card-head">${escapeHtml(t("panel.log"))}</div>
-      <div class="card-body log-view">
-        ${state.log.length ? state.log.map((l) => `<div class="log-line">${escapeHtml(l)}</div>`).join("") : `<p class="empty">No events yet</p>`}
-      </div>
-    </div>`;
-}
-
-function bindViewportEvents() {
-  document.querySelectorAll(".device-row[data-path]").forEach((el) => {
-    el.onclick = () => {
-      state.selected = el.dataset.path;
-      if (state.tab === "devices") renderViewport();
-    };
-  });
-  document.querySelectorAll("[data-goto]").forEach((el) => {
-    el.onclick = () => {
-      state.tab = el.dataset.goto;
-      renderShell();
-    };
-  });
-  document.querySelector("[data-action=refresh]")?.addEventListener("click", () => refreshAll());
-  document.getElementById("dryRunChk")?.addEventListener("change", (e) => {
-    state.dryRun = e.target.checked;
-  });
-  document.getElementById("opMountBtn")?.addEventListener("click", () => runOp("Mount"));
-  document.getElementById("opUmountBtn")?.addEventListener("click", () => runOp("Unmount"));
-  document.getElementById("opConvertBtn")?.addEventListener("click", () => runOp("ConvertImage"));
-  document.getElementById("imgInfoBtn")?.addEventListener("click", () => loadImageInfo());
-  document.getElementById("imgPath")?.addEventListener("change", (e) => {
-    state.imagePath = e.target.value;
-  });
-  document.querySelectorAll("[data-storage]").forEach((el) => {
-    el.onclick = () => loadProxmoxVolumes(el.dataset.storage);
-  });
-}
-
-async function loadImageInfo() {
-  state.imagePath = document.getElementById("imgPath")?.value?.trim() || "";
-  if (!state.imagePath) {
-    showToast("Enter an image path");
-    return;
-  }
+async function submitJob() {
+  const source = document.getElementById("mSource")?.value?.trim();
+  const dest = document.getElementById("mDest")?.value?.trim();
+  const format = document.getElementById("mFmt")?.value || "qcow2";
+  if (!source || !dest) { log("Source and destination required", "warn"); return; }
+  const dry = document.getElementById("mDry")?.checked ?? true;
   try {
-    state.imageInfo = await api(`/api/qemu/info?path=${encodeURIComponent(state.imagePath)}`);
-    pushLog(`Image: ${state.imageInfo.format}`);
-    showToast(`Format: ${state.imageInfo.format}`);
-    renderViewport();
-  } catch (e) {
-    showToast(e.message);
-    pushLog(`Image error: ${e.message}`);
-    if (state.tab === "logs") renderViewport();
-  }
-}
-
-async function loadProxmoxVolumes(storage) {
-  try {
-    state.proxmoxSelected = await api(`/api/proxmox/storage/${encodeURIComponent(storage)}/volumes`);
-    pushLog(`Proxmox ${storage}: ${(state.proxmoxSelected.volumes || []).length} volumes`);
-    renderViewport();
-  } catch (e) {
-    showToast(e.message);
-  }
-}
-
-async function runOp(kind) {
-  const device = document.getElementById("opDevice")?.value?.trim();
-  const mount_point = document.getElementById("opMount")?.value?.trim();
-  const dest = document.getElementById("opDest")?.value?.trim();
-  const body = { kind, dry_run: state.dryRun, device, mount_point };
-  if (kind === "ConvertImage") {
-    body.source = state.imagePath || device;
-    body.dest = dest;
-  }
-  try {
-    const result = await api("/api/operations", {
+    const job = await api("/api/jobs/convert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ source, dest, format, dry_run: dry }),
     });
-    const msg = result.message === "dry-run" ? `[dry-run] ${result.command}` : result.command;
-    pushLog(msg);
-    showToast(msg);
+    state.jobId = job.id;
+    log(job.logs?.[0] || job.message, "info");
+    if (!dry && job.status === "running") pollJob(job.id);
+    else closeModal();
   } catch (e) {
-    showToast(e.message);
-    pushLog(`Operation failed: ${e.message}`);
+    log(e.message, "warn");
   }
 }
 
-async function loadI18n() {
-  const bundle = await api(`/api/i18n/${state.lang}`);
-  state.strings = bundle.strings;
-  state.strings["nav.dashboard"] = state.strings["nav.dashboard"] || "Dashboard";
-  state.strings["nav.devices.sub"] = state.strings["nav.devices.sub"] || "Local disks & partitions";
-  document.documentElement.lang = state.lang;
-}
-
-async function loadThemes() {
-  const data = await api("/api/themes");
-  state.themes = data.themes || [];
-  if (!state.themes.some((x) => x.id === state.theme)) {
-    state.theme = state.themes.find((x) => x.id === "slate-pro")?.id || state.themes[0]?.id;
+async function pollJob(id) {
+  for (let i = 0; i < 120; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const job = await api(`/api/jobs/${id}`);
+    state.jobPct = job.progress_pct || 0;
+    job.logs?.slice(-3).forEach((l) => log(l, "info"));
+    renderModal();
+    if (job.status === "done" || job.status === "failed") {
+      log(job.message, job.status === "done" ? "info" : "warn");
+      state.jobId = null;
+      closeModal();
+      return;
+    }
   }
 }
 
-function pushLog(msg) {
-  const ts = new Date().toLocaleTimeString();
-  state.log.unshift(`[${ts}] ${msg}`);
-  state.log = state.log.slice(0, 300);
-}
-
-async function refreshAll() {
-  state.refreshing = true;
-  document.getElementById("refreshBtn")?.setAttribute("disabled", "true");
-  pushLog("Refreshing…");
-  try {
-    state.devices = (await api("/api/devices")).devices || [];
-  } catch (e) {
-    pushLog(`Devices: ${e.message}`);
-  }
-  try {
-    state.lvm = await api("/api/lvm");
-  } catch {
-    state.lvm = { vgs: [], lvs: [], pvs: [] };
-  }
-  try {
-    state.tools = (await api("/api/tools")).tools || [];
-  } catch (e) {
-    pushLog(`Tools: ${e.message}`);
-  }
-  try {
-    state.proxmox = await api("/api/proxmox/storages");
-  } catch {
-    state.proxmox = { available: false, storages: [] };
-  }
-  if (state.devices.length && !state.selected) {
-    state.selected = flattenDevices(state.devices)[0]?.path || null;
-  }
-  state.refreshing = false;
-  document.getElementById("refreshBtn")?.removeAttribute("disabled");
-  pushLog("Refresh complete.");
-  showToast("Telemetry updated");
-  const badge = document.querySelector(".header-badge");
-  if (badge) badge.textContent = `${deviceCount()} devices`;
-  renderViewport();
-  const footerTools = document.querySelector(".sidebar-footer .status-row span:last-child");
-  if (footerTools) footerTools.textContent = `${state.tools.length} installed`;
+async function refresh() {
+  log("Refreshing telemetry…", "info");
+  state.telemetry = await api("/api/telemetry");
+  const dev = await api("/api/devices");
+  state.devices = dev.devices || [];
+  if (!state.selectedDisk && state.devices[0]) state.selectedDisk = state.devices[0].path;
+  state.tools = (await api("/api/tools")).tools || [];
+  state.health = await api("/api/health-audit");
+  state.zfs = await api("/api/zfs/pools");
+  state.vmVolumes = (await api("/api/vm-volumes")).volumes || [];
+  await loadPartitionMap();
+  paintTools();
+  document.querySelectorAll(".metric-pill strong");
+  render();
+  bind();
+  log("Refresh complete", "info");
 }
 
 (async function boot() {
+  document.documentElement.setAttribute("data-ui-theme", state.uiTheme);
+  render();
+  bind();
   try {
-    await loadThemes();
-    applyTheme(state.theme);
-    await loadI18n();
-    const meta = LANG_OPTIONS.find((l) => l.code === state.lang);
-    document.documentElement.dir = meta?.dir || "ltr";
-    renderShell();
-    bindGlobalClick();
-    await refreshAll();
+    await refresh();
+    setInterval(() => api("/api/telemetry").then((t) => { state.telemetry = t; }).catch(() => {}), 15000);
   } catch (e) {
-    document.getElementById("app").innerHTML = `<div class="empty" style="padding:2rem;color:#fb7185">Failed to start: ${escapeHtml(e.message)}</div>`;
+    log(`Boot error: ${e.message}`, "warn");
   }
 })();
