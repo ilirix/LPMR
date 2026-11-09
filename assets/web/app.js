@@ -332,7 +332,7 @@ function viewDisks() {
           <button type="button" class="btn btn-sm" data-op="Mount">Mount</button>
           <button type="button" class="btn btn-sm" data-op="FormatFilesystem">Format</button>
           <button type="button" class="btn btn-sm" data-op="Unmount">Unmount</button>
-          <button type="button" class="btn btn-sm btn-primary" data-op="ConvertImage">Convert image</button>
+          <button type="button" class="btn btn-sm btn-primary" data-open-convert="raw">Convert image</button>
         </div>
       </div>
     </div>
@@ -450,15 +450,18 @@ function bindMain() {
       paintMain();
     };
   });
-  document.querySelectorAll("[data-op]").forEach((el) => {
+  document.querySelectorAll("[data-open-convert]").forEach((el) => {
     el.onclick = () => {
-      if (el.dataset.op === "ConvertImage") {
-        if (state.selectedDisk) state.convertSource = state.selectedDisk;
-        openModal("raw");
+      if (!state.selectedDisk) {
+        log("Select a disk first", "warn");
         return;
       }
-      runOp(el.dataset.op);
+      state.convertSource = state.selectedDisk;
+      openModal(el.dataset.openConvert || "raw");
     };
+  });
+  document.querySelectorAll("[data-op]").forEach((el) => {
+    el.onclick = () => runOp(el.dataset.op);
   });
   document.querySelectorAll("[data-convert]").forEach((el) => {
     el.onclick = async () => {
