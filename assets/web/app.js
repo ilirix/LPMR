@@ -542,43 +542,49 @@ function renderModal() {
   if (bg) bg.addEventListener("click", (e) => { if (e.target.id === "modalBg") closeModal(); });
   if (closeBtn) closeBtn.onclick = closeModal;
   if (cancelBtn) cancelBtn.onclick = closeModal;
-  if (runBtn) runBtn.onclick = () => submitJob();
+  if (runBtn) {
+    runBtn.onclick = () => {
+      if (state.modal === "create") submitCreateVolume();
+      else submitConvertJob();
+    };
+  }
   const dry = document.getElementById("mDry");
   if (dry) dry.onchange = () => { state.modalDryRun = dry.checked; };
 }
 
-async function submitJob() {
-  const dest = document.getElementById("mDest")?.value?.trim();
+async function submitCreateVolume() {
+  const path = document.getElementById("mDest")?.value?.trim();
   const format = document.getElementById("mFmt")?.value || "qcow2";
   const dry = document.getElementById("mDry")?.checked ?? true;
-
-  if (state.modal === "create") {
-    if (!dest) {
-      log("Image path required", "warn");
-      return;
-    }
-    const size = document.getElementById("mSize")?.value?.trim() || "32G";
-    try {
-      const r = await api("/api/operations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "CreateImage",
-          dry_run: dry,
-          path: dest,
-          size,
-          image_format: format,
-        }),
-      });
-      log(r.command, r.message === "dry-run" ? "warn" : "info");
-      closeModal();
-    } catch (e) {
-      log(e.message, "warn");
-    }
+  if (!path) {
+    log("Image path required", "warn");
     return;
   }
+  const size = document.getElementById("mSize")?.value?.trim() || "32G";
+  try {
+    const r = await api("/api/operations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "CreateImage",
+        dry_run: dry,
+        path,
+        size,
+        image_format: format,
+      }),
+    });
+    log(r.command, r.message === "dry-run" ? "warn" : "info");
+    closeModal();
+  } catch (e) {
+    log(e.message, "warn");
+  }
+}
 
+async function submitConvertJob() {
+  const dest = document.getElementById("mDest")?.value?.trim();
   const source = document.getElementById("mSource")?.value?.trim();
+  const format = document.getElementById("mFmt")?.value || "qcow2";
+  const dry = document.getElementById("mDry")?.checked ?? true;
   if (!source || !dest) {
     log("Source and destination required", "warn");
     return;
