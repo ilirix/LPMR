@@ -649,13 +649,17 @@ async function refreshPart(label, fn, onError) {
 
 async function refresh() {
   log("Refreshing telemetry…", "info");
+  try {
   await refreshPart("telemetry", async () => {
     state.telemetry = await api("/api/telemetry");
   });
   await refreshPart("devices", async () => {
     const dev = await api("/api/devices");
     state.devices = dev.devices || [];
+    if (dev.error) log(`devices: ${dev.error}`, "warn");
     if (!state.selectedDisk && state.devices[0]) state.selectedDisk = state.devices[0].path;
+  }, () => {
+    state.devices = [];
   });
   await refreshPart("tools", async () => {
     state.tools = (await api("/api/tools")).tools || [];
@@ -686,11 +690,13 @@ async function refresh() {
     state.vmVolumes = [];
   });
   await refreshPart("partitions", () => loadPartitionMap());
-  paintTools();
-  render();
-  bind();
-  setTheme(state.uiTheme);
-  log("Refresh complete", "info");
+  } finally {
+    paintTools();
+    render();
+    bind();
+    setTheme(state.uiTheme);
+    log("Refresh complete", "info");
+  }
 }
 
 (async function boot() {

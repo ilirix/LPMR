@@ -89,9 +89,15 @@ async fn health() -> Json<serde_json::Value> {
     Json(json!({"status":"ok","panel":"lpmr-web"}))
 }
 
-async fn devices() -> Result<Json<serde_json::Value>, AppError> {
-    let tree = scan_block_devices()?;
-    Ok(Json(json!(tree)))
+async fn devices() -> Json<serde_json::Value> {
+    match scan_block_devices() {
+        Ok(tree) => Json(json!(tree)),
+        Err(e) => Json(json!({
+            "devices": [],
+            "scanned_at": "",
+            "error": e.to_string(),
+        })),
+    }
 }
 
 async fn lvm() -> Result<Json<serde_json::Value>, AppError> {
