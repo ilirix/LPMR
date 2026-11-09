@@ -18,6 +18,9 @@ if [[ ! -x target/release/lpmr ]]; then
   cargo build --release
 fi
 
+if [[ "$BIND" == *"0.0.0.0"* ]] && [[ -z "${LPMR_EXECUTE_TOKEN:-}" ]]; then
+  echo "WARNING: public bind without LPMR_EXECUTE_TOKEN — only dry-run from remote; real execution needs token or loopback." >&2
+fi
 echo "LPMR orchestrator → http://${BIND/0.0.0.0/localhost}"
 echo "  Web UI + API  |  Terminal: lpmr tui"
 exec ./target/release/lpmr web --bind "$BIND"

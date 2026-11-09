@@ -47,6 +47,7 @@ struct OpBody {
 
 pub fn api_router() -> Router<AppState> {
     Router::new()
+        .route("/api/session", get(session))
         .route("/api/health", get(health))
         .route("/api/devices", get(devices))
         .route("/api/lvm", get(lvm))
@@ -75,6 +76,13 @@ pub fn static_router(assets_dir: std::path::PathBuf) -> Router<AppState> {
         .route_service("/", get_service(ServeFile::new(index_page.clone())))
         .nest_service("/assets", ServeDir::new(web_root.clone()))
         .fallback_service(ServeFile::new(index_page))
+}
+
+async fn session(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({
+        "csrf": state.execute_csrf,
+        "execute_policy": "non-dry-run requires X-LPMR-CSRF, loopback client, LPMR_EXECUTE_TOKEN, or LPMR_ALLOW_REMOTE_EXECUTE",
+    }))
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -267,7 +275,7 @@ async fn job_convert(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let dry = body.dry_run.unwrap_or(true);
     if !dry {
-        authorize_execute(Some(peer), &headers)?;
+        authorize_execute(Some(peer), &headers, &state.execute_csrf)?;
     }
     let (source, dest) = resolve_and_validate_convert_paths(&body.source, &body.dest)
         .map_err(AppError)?;
@@ -331,13 +339,14 @@ async fn job_status(
 }
 
 async fn run_operation(
+    State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
     Json(body): Json<OpBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let dry = body.dry_run.unwrap_or(true);
     if !dry {
-        authorize_execute(Some(peer), &headers)?;
+        authorize_execute(Some(peer), &headers, &state.execute_csrf)?;
     }
     if body.kind == OperationKind::ConvertImage {
         let source = body

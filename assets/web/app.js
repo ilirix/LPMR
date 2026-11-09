@@ -41,6 +41,7 @@ const state = {
   jobPct: 0,
   jobPolling: false,
   search: "",
+  executeCsrf: null,
 };
 
 function esc(s) {
@@ -55,8 +56,29 @@ function fmt(b) {
   return i ? `${v.toFixed(2)} ${u[i]}` : `${b} ${u[0]}`;
 }
 
+async function ensureExecuteCsrf() {
+  if (state.executeCsrf) return state.executeCsrf;
+  const s = await fetch("/api/session").then((r) => r.json());
+  state.executeCsrf = s.csrf;
+  return state.executeCsrf;
+}
+
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  opts = opts || {};
+  const headers = { ...(opts.headers || {}) };
+  if (opts.method === "POST" && opts.body) {
+    let dryRun = true;
+    try {
+      const parsed = JSON.parse(opts.body);
+      if (parsed.dry_run === false) dryRun = false;
+    } catch {
+      /* ignore */
+    }
+    if (!dryRun) {
+      headers["X-LPMR-CSRF"] = await ensureExecuteCsrf();
+    }
+  }
+  const r = await fetch(path, { ...opts, headers });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
@@ -663,6 +685,7 @@ async function refresh() {
   render();
   bind();
   try {
+    await ensureExecuteCsrf();
     await refresh();
     setInterval(() => api("/api/telemetry").then((t) => { state.telemetry = t; }).catch(() => {}), 15000);
   } catch (e) {

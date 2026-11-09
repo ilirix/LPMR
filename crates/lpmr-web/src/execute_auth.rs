@@ -2,8 +2,12 @@ use anyhow::{bail, Result};
 use axum::http::HeaderMap;
 use std::net::{IpAddr, SocketAddr};
 
-/// Non-dry-run API actions require loopback origin or `X-LPMR-Token` matching `LPMR_EXECUTE_TOKEN`.
-pub fn authorize_execute(peer: Option<SocketAddr>, headers: &HeaderMap) -> Result<()> {
+/// Non-dry-run API actions require `X-LPMR-CSRF`, `X-LPMR-Token`, loopback client IP, or explicit remote allow.
+pub fn authorize_execute(
+    peer: Option<SocketAddr>,
+    headers: &HeaderMap,
+    execute_csrf: &str,
+) -> Result<()> {
     if let Ok(expected) = std::env::var("LPMR_EXECUTE_TOKEN") {
         let got = headers
             .get("x-lpmr-token")
@@ -13,6 +17,13 @@ pub fn authorize_execute(peer: Option<SocketAddr>, headers: &HeaderMap) -> Resul
             return Ok(());
         }
         bail!("missing or invalid X-LPMR-Token");
+    }
+    if headers
+        .get("x-lpmr-csrf")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|got| got == execute_csrf)
+    {
+        return Ok(());
     }
     let allow_remote = std::env::var("LPMR_ALLOW_REMOTE_EXECUTE")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
