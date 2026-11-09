@@ -419,8 +419,12 @@ function bindMain() {
   });
   document.querySelectorAll("[data-op]").forEach((el) => {
     el.onclick = () => {
-      if (el.dataset.op === "ConvertImage") openModal("raw");
-      else runOp(el.dataset.op);
+      if (el.dataset.op === "ConvertImage") {
+        if (state.selectedDisk) state.convertSource = state.selectedDisk;
+        openModal("raw");
+        return;
+      }
+      runOp(el.dataset.op);
     };
   });
   document.querySelectorAll("[data-convert]").forEach((el) => {
@@ -455,6 +459,11 @@ async function loadPartitionMap() {
 }
 
 async function runOp(kind) {
+  if (kind === "ConvertImage") {
+    if (state.selectedDisk) state.convertSource = state.selectedDisk;
+    openModal("raw");
+    return;
+  }
   const device = state.selectedDisk;
   if (!device) { log("Select a disk first", "warn"); return; }
   try {
