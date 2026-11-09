@@ -516,6 +516,9 @@ function openModal(kind) {
 }
 
 function closeModal() {
+  if (state.jobPolling && state.jobId) {
+    log(`Job ${state.jobId} still running — progress updates continue in the log`, "info");
+  }
   state.modal = null;
   renderModal();
 }
@@ -597,6 +600,10 @@ async function submitCreateVolume() {
 }
 
 async function submitConvertJob() {
+  if (state.jobPolling) {
+    log("A conversion is already in progress", "warn");
+    return;
+  }
   const dest = document.getElementById("mDest")?.value?.trim();
   let source = document.getElementById("mSource")?.value?.trim();
   const format = document.getElementById("mFmt")?.value || "qcow2";
@@ -624,29 +631,32 @@ async function submitConvertJob() {
 
 async function pollJob(id) {
   state.jobPolling = true;
+  state.jobId = id;
   renderModal();
-  while (state.jobId === id) {
-    await new Promise((r) => setTimeout(r, 1000));
-    let job;
-    try {
-      job = await api(`/api/jobs/${id}`);
-    } catch (e) {
-      log(e.message, "warn");
-      continue;
+  try {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1000));
+      let job;
+      try {
+        job = await api(`/api/jobs/${id}`);
+      } catch (e) {
+        log(e.message, "warn");
+        continue;
+      }
+      state.jobPct = job.progress_pct || 0;
+      const tail = job.logs?.slice(-1) || [];
+      tail.forEach((l) => log(l, "info"));
+      if (state.modal) renderModal();
+      if (job.status === "done" || job.status === "failed") {
+        log(job.message, job.status === "done" ? "info" : "warn");
+        closeModal();
+        return;
+      }
     }
-    state.jobPct = job.progress_pct || 0;
-    const tail = job.logs?.slice(-1) || [];
-    tail.forEach((l) => log(l, "info"));
-    renderModal();
-    if (job.status === "done" || job.status === "failed") {
-      log(job.message, job.status === "done" ? "info" : "warn");
-      state.jobId = null;
-      state.jobPolling = false;
-      closeModal();
-      return;
-    }
+  } finally {
+    state.jobPolling = false;
+    state.jobId = null;
   }
-  state.jobPolling = false;
 }
 
 async function refreshPart(label, fn, onError) {
