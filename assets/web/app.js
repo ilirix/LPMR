@@ -34,10 +34,12 @@ const state = {
   health: null,
   tools: [],
   dryRun: true,
+  modalDryRun: true,
   log: [],
   modal: null,
   jobId: null,
   jobPct: 0,
+  jobPolling: false,
   search: "",
 };
 
@@ -324,7 +326,7 @@ function viewVm() {
             ${rows.length ? rows.map((v) => `
               <tr>
                 <td>${esc(v.volid)}</td><td>${esc(v.format)}</td><td>${esc(v.size)}</td><td>${esc(v.storage)}</td>
-                <td><button type="button" class="btn btn-sm" data-convert="${esc(v.volid)}">Convert</button></td>
+                <td><button type="button" class="btn btn-sm" data-convert="${esc(v.volid)}" data-path="${esc(v.path || "")}">Convert</button></td>
               </tr>`).join("") : `<tr><td colspan="5" style="color:var(--muted)">No VM volumes (not on PVE or empty)</td></tr>`}
           </tbody>
         </table>
@@ -422,7 +424,21 @@ function bindMain() {
     };
   });
   document.querySelectorAll("[data-convert]").forEach((el) => {
-    el.onclick = () => { state.convertSource = el.dataset.convert; openModal("vhdx"); };
+    el.onclick = async () => {
+      const volid = el.dataset.convert;
+      let src = el.dataset.path || "";
+      if (!src) {
+        try {
+          const r = await api(`/api/proxmox/resolve-path?volid=${encodeURIComponent(volid)}`);
+          src = r.path;
+        } catch (e) {
+          log(`Could not resolve ${volid}: ${e.message}`, "warn");
+          return;
+        }
+      }
+      state.convertSource = src;
+      openModal("vhdx");
+    };
   });
   document.querySelectorAll("[data-theme]").forEach((el) => {
     if (el.closest(".btn-row")) el.onclick = () => setTheme(el.dataset.theme);
@@ -453,6 +469,7 @@ async function runOp(kind) {
 
 function openModal(kind) {
   state.modal = kind;
+  state.modalDryRun = true;
   renderModal();
 }
 
@@ -478,11 +495,11 @@ function renderModal() {
           <label>${state.modal === "create" ? "Image path" : "Destination"}<input id="mDest" placeholder="${state.modal === "create" ? "/var/lib/vz/images/new.qcow2" : "/var/lib/vz/images/out.qcow2"}"/></label>
           ${state.modal === "create" ? `<label>Size<input id="mSize" value="32G" placeholder="32G"/></label>` : ""}
           <label>Output format<select id="mFmt"><option>qcow2</option><option>raw</option><option>vmdk</option><option>vhdx</option></select></label>
-          <label><input type="checkbox" id="mDry" ${state.dryRun ? "checked" : ""}/> Dry-run (recommended)</label>
+          <label><input type="checkbox" id="mDry" ${state.modalDryRun ? "checked" : ""}/> Dry-run (recommended)</label>
           ${state.jobId ? `<div class="progress-bar"><div class="progress-fill" style="width:${state.jobPct}%"></div></div>` : ""}
           <div class="btn-row" style="margin-top:16px">
             <button type="button" class="btn" id="modalCancel">Cancel</button>
-            <button type="button" class="btn btn-primary" id="modalRun">${state.modal === "create" ? "Create image" : "Start conversion"}</button>
+            <button type="button" class="btn btn-primary" id="modalRun" ${state.jobPolling ? "disabled" : ""}>${state.modal === "create" ? "Create image" : "Start conversion"}</button>
           </div>
         </div>
       </div>
@@ -496,14 +513,13 @@ function renderModal() {
   if (cancelBtn) cancelBtn.onclick = closeModal;
   if (runBtn) runBtn.onclick = () => submitJob();
   const dry = document.getElementById("mDry");
-  if (dry) dry.onchange = () => { state.dryRun = dry.checked; };
+  if (dry) dry.onchange = () => { state.modalDryRun = dry.checked; };
 }
 
 async function submitJob() {
   const dest = document.getElementById("mDest")?.value?.trim();
   const format = document.getElementById("mFmt")?.value || "qcow2";
   const dry = document.getElementById("mDry")?.checked ?? true;
-  state.dryRun = dry;
 
   if (state.modal === "create") {
     if (!dest) {
@@ -552,33 +568,70 @@ async function submitJob() {
 }
 
 async function pollJob(id) {
-  for (let i = 0; i < 120; i++) {
+  state.jobPolling = true;
+  renderModal();
+  while (state.jobId === id) {
     await new Promise((r) => setTimeout(r, 1000));
-    const job = await api(`/api/jobs/${id}`);
+    let job;
+    try {
+      job = await api(`/api/jobs/${id}`);
+    } catch (e) {
+      log(e.message, "warn");
+      continue;
+    }
     state.jobPct = job.progress_pct || 0;
-    job.logs?.slice(-3).forEach((l) => log(l, "info"));
+    const tail = job.logs?.slice(-1) || [];
+    tail.forEach((l) => log(l, "info"));
     renderModal();
     if (job.status === "done" || job.status === "failed") {
       log(job.message, job.status === "done" ? "info" : "warn");
       state.jobId = null;
+      state.jobPolling = false;
       closeModal();
       return;
     }
+  }
+  state.jobPolling = false;
+}
+
+async function refreshPart(label, fn) {
+  try {
+    await fn();
+  } catch (e) {
+    log(`${label}: ${e.message}`, "warn");
   }
 }
 
 async function refresh() {
   log("Refreshing telemetry…", "info");
-  state.telemetry = await api("/api/telemetry");
-  const dev = await api("/api/devices");
-  state.devices = dev.devices || [];
-  if (!state.selectedDisk && state.devices[0]) state.selectedDisk = state.devices[0].path;
-  state.tools = (await api("/api/tools")).tools || [];
-  state.enterpriseThemes = (await api("/api/themes")).themes || [];
-  state.health = await api("/api/health-audit");
-  state.zfs = await api("/api/zfs/pools");
-  state.lvm = await api("/api/lvm");
-  state.vmVolumes = (await api("/api/vm-volumes")).volumes || [];
+  await refreshPart("telemetry", async () => {
+    state.telemetry = await api("/api/telemetry");
+  });
+  await refreshPart("devices", async () => {
+    const dev = await api("/api/devices");
+    state.devices = dev.devices || [];
+    if (!state.selectedDisk && state.devices[0]) state.selectedDisk = state.devices[0].path;
+  });
+  await refreshPart("tools", async () => {
+    state.tools = (await api("/api/tools")).tools || [];
+  });
+  await refreshPart("themes", async () => {
+    state.enterpriseThemes = (await api("/api/themes")).themes || [];
+  });
+  await refreshPart("health", async () => {
+    state.health = await api("/api/health-audit");
+  });
+  await refreshPart("zfs", async () => {
+    state.zfs = await api("/api/zfs/pools");
+  });
+  await refreshPart("lvm", async () => {
+    state.lvm = await api("/api/lvm");
+  });
+  await refreshPart("vm-volumes", async () => {
+    const vm = await api("/api/vm-volumes");
+    state.vmVolumes = vm.volumes || [];
+    if (vm.error) log(`vm-volumes: ${vm.error}`, "warn");
+  });
   await loadPartitionMap();
   paintTools();
   render();

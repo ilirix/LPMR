@@ -1,3 +1,5 @@
+mod convert_paths;
+mod execute_auth;
 mod jobs;
 mod routes;
 mod state;
@@ -21,6 +23,10 @@ pub async fn serve(bind: SocketAddr, assets_dir: std::path::PathBuf) -> Result<(
 
     info!("LPMR web panel listening on http://{bind}");
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }

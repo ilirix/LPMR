@@ -4,7 +4,7 @@ use crate::tools::{ensure_tool, run_command_ok, validate_block_path};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum OperationKind {
     CreatePartition,
     DeletePartition,

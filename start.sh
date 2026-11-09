@@ -5,7 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 export PATH="${HOME}/.cargo/bin:/usr/local/cargo/bin:${PATH}"
 
-BIND="${LPMR_BIND:-0.0.0.0:8787}"
+# Bind loopback by default; expose with LPMR_BIND=0.0.0.0:8787 and LPMR_EXECUTE_TOKEN for remote execute
+BIND="${LPMR_BIND:-127.0.0.1:8787}"
 INSTALL_DEPS="${LPMR_INSTALL_DEPS:-0}"
 
 if [[ "$INSTALL_DEPS" == "1" ]] && [[ -x scripts/install-deps.sh ]]; then

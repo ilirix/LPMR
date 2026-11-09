@@ -13,9 +13,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start web orchestrator (same as `web`, default 0.0.0.0:8787)
+    /// Start web orchestrator (same as `web`, default 127.0.0.1:8787)
     Start {
-        #[arg(long, default_value = "0.0.0.0:8787")]
+        #[arg(long, default_value = "127.0.0.1:8787")]
         bind: String,
     },
     /// Launch the terminal panel (Ratatui, Raven-inspired dock layout)

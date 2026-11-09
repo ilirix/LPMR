@@ -96,3 +96,32 @@ pub fn validate_block_path(path: &str) -> Result<()> {
     }
     Ok(())
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QemuPathRole {
+    Source,
+    Dest,
+}
+
+const QEMU_DEST_DENY_PREFIXES: &[&str] = &[
+    "/dev/", "/proc/", "/sys/", "/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/run/",
+];
+
+/// Guards qemu-img source/dest paths for API-triggered converts (blocks raw disk overwrites as dest).
+pub fn validate_qemu_image_path(path: &str, role: QemuPathRole) -> Result<()> {
+    if path.is_empty() || path.contains("..") {
+        bail!("Invalid image path");
+    }
+    let p = Path::new(path);
+    if !p.is_absolute() {
+        bail!("Image path must be absolute");
+    }
+    if role == QemuPathRole::Dest {
+        for prefix in QEMU_DEST_DENY_PREFIXES {
+            if path.starts_with(prefix) {
+                bail!("Destination path not allowed: {path}");
+            }
+        }
+    }
+    Ok(())
+}
