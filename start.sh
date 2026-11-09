@@ -12,7 +12,7 @@ DAEMON="${LPMR_DAEMON:-0}"
 
 if [[ -z "${LPMR_BIND:-}" ]]; then
   if command -v pvesm >/dev/null 2>&1; then
-  # Proxmox node: listen on all interfaces so the UI is reachable from your workstation
+    # Proxmox node: listen on all interfaces so the UI is reachable from your workstation
     BIND="0.0.0.0:8787"
   else
     BIND="127.0.0.1:8787"

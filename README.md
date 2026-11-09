@@ -11,8 +11,6 @@ Lightweight **Rust** control plane for Linux block storage, partitions, LVM, LUK
 ```bash
 git clone https://github.com/ilirix/LPMR.git
 cd LPMR
-# Until the volume-panel PR merges, use the orchestrator branch:
-# git checkout cursor/lpmr-volume-panel-5c83
 chmod +x start.sh scripts/ensure-rust.sh
 ./start.sh
 ```
@@ -178,7 +176,7 @@ docs/images/             # Screenshots & diagrams
 
 ## Security
 
-- Bind defaults to `0.0.0.0:8787` in `./start.sh` — use firewall or `127.0.0.1` on untrusted networks.
+- `./start.sh` binds **0.0.0.0:8787** on Proxmox nodes and **127.0.0.1:8787** elsewhere — use a firewall, `LPMR_BIND`, or set **`LPMR_EXECUTE_TOKEN`** before exposing real execution on untrusted networks.
 - Destructive actions default to **dry-run**. Run the panel as root only when executing real mutations.
 
 ## License
