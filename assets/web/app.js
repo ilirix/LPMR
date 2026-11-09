@@ -56,6 +56,17 @@ function fmt(b) {
   return i ? `${v.toFixed(2)} ${u[i]}` : `${b} ${u[0]}`;
 }
 
+async function resolveProxmoxVolidToPath(volidOrPath) {
+  const trimmed = (volidOrPath || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("/")) return trimmed;
+  if (trimmed.includes(":")) {
+    const r = await api(`/api/proxmox/resolve-path?volid=${encodeURIComponent(trimmed)}`);
+    return r.path;
+  }
+  return trimmed;
+}
+
 async function ensureExecuteCsrf() {
   if (state.executeCsrf) return state.executeCsrf;
   const s = await fetch("/api/session").then((r) => r.json());
@@ -452,18 +463,13 @@ function bindMain() {
   document.querySelectorAll("[data-convert]").forEach((el) => {
     el.onclick = async () => {
       const volid = el.dataset.convert;
-      let src = el.dataset.path || "";
-      if (!src) {
-        try {
-          const r = await api(`/api/proxmox/resolve-path?volid=${encodeURIComponent(volid)}`);
-          src = r.path;
-        } catch (e) {
-          log(`Could not resolve ${volid}: ${e.message}`, "warn");
-          return;
-        }
+      try {
+        state.convertSource = await resolveProxmoxVolidToPath(volid);
+        log(`Resolved ${volid} → ${state.convertSource}`, "info");
+        openModal("vhdx");
+      } catch (e) {
+        log(`Could not resolve ${volid}: ${e.message}`, "warn");
       }
-      state.convertSource = src;
-      openModal("vhdx");
     };
   });
   document.querySelectorAll("[data-theme]").forEach((el) => {
@@ -582,7 +588,7 @@ async function submitCreateVolume() {
 
 async function submitConvertJob() {
   const dest = document.getElementById("mDest")?.value?.trim();
-  const source = document.getElementById("mSource")?.value?.trim();
+  let source = document.getElementById("mSource")?.value?.trim();
   const format = document.getElementById("mFmt")?.value || "qcow2";
   const dry = document.getElementById("mDry")?.checked ?? true;
   if (!source || !dest) {
@@ -590,6 +596,7 @@ async function submitConvertJob() {
     return;
   }
   try {
+    source = await resolveProxmoxVolidToPath(source);
     const job = await api("/api/jobs/convert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
