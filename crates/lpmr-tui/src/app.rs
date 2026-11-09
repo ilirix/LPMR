@@ -2,7 +2,7 @@ use crate::theme::{accent_style, border_style, theme_cycle, title_style, TuiPale
 use crossterm::event::KeyCode;
 use lpmr_core::devices::{format_size, scan_block_devices, BlockDevice};
 use lpmr_core::i18n::{Language, translate};
-use lpmr_core::lvm::scan_lvm;
+use lpmr_core::lvm::{lvm_available, scan_lvm};
 use lpmr_core::ops::{execute, OperationKind, OperationRequest};
 use lpmr_core::tools::discover_installed_tools;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -90,11 +90,15 @@ impl App {
             }
             Err(e) => self.log(format!("Device scan failed: {e}")),
         }
-        match scan_lvm() {
-            Ok(s) => {
-                self.lvm_text = serde_json::to_string_pretty(&s).unwrap_or_default();
+        if !lvm_available() {
+            self.lvm_text = "LVM not installed — install lvm2 package".into();
+        } else {
+            match scan_lvm() {
+                Ok(s) => {
+                    self.lvm_text = serde_json::to_string_pretty(&s).unwrap_or_default();
+                }
+                Err(e) => self.lvm_text = format!("LVM scan failed: {e}"),
             }
-            Err(e) => self.lvm_text = format!("LVM unavailable: {e}"),
         }
         let tools = discover_installed_tools();
         self.tools_text = tools

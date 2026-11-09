@@ -6,28 +6,47 @@ Lightweight **Rust** control plane for Linux block storage, partitions, LVM, LUK
 
 ## Quick start (one script)
 
+**Proxmox VE / Debian:** do not rely on `apt install cargo` alone — it ships **rustc 1.85**, while this tree needs **≥ 1.88**. `./start.sh` calls `scripts/ensure-rust.sh` and installs **rustup** automatically when needed (`RUSTUP_INIT_SKIP_PATH_CHECK=yes` so it coexists with apt packages).
+
 ```bash
-chmod +x start.sh
+git clone https://github.com/ilirix/LPMR.git
+cd LPMR
+chmod +x start.sh scripts/ensure-rust.sh
 ./start.sh
 ```
 
-Open **http://localhost:8787** (bind override: `LPMR_BIND=127.0.0.1:8787 ./start.sh`).
+On a **Proxmox node** (`pvesm` present), the default bind is **0.0.0.0:8787** so you can open `http://<pve-host>:8787` from your browser. Elsewhere it defaults to **127.0.0.1:8787**. Override with `LPMR_BIND=…`.
 
-Optional dependency install: `LPMR_INSTALL_DEPS=1 ./start.sh`
+`./start.sh` runs in the **foreground** (logs to the terminal; stop with Ctrl+C). For SSH sessions, use background mode:
+
+```bash
+LPMR_DAEMON=1 ./start.sh    # writes .lpmr.pid and lpmr-web.log
+kill "$(cat .lpmr.pid)"   # stop
+```
+
+Fresh Debian smoke test: `chmod +x scripts/debian-fresh-test.sh && ./scripts/debian-fresh-test.sh`
+
+Optional host tools: `LPMR_INSTALL_DEPS=1 ./start.sh`
 
 Equivalent CLI:
 
 ```bash
 cargo build --release
-./target/release/lpmr start          # 0.0.0.0:8787
+./target/release/lpmr web --bind 127.0.0.1:8787
 ./target/release/lpmr tui            # terminal panel
 ```
 
 ## GUI screenshots
 
-### Main orchestrator (disks, partition visualizer, toolchain audit, log)
+> **Note:** `docs/images/gui-orchestrator-main.png` is a **design target** (future cluster / `io_uring` panels). The **shipped web UI** is the **Raven // Baremetal** three-column orchestrator below (same layout as a Proxmox node with `install-deps`).
 
-![Main orchestrator](docs/images/gui-orchestrator-main.png)
+### Live orchestrator (disks, partition visualizer, toolchain audit, log)
+
+![Live orchestrator UI](docs/images/gui-orchestrator-live.png)
+
+### Design reference (roadmap mockup)
+
+![Design target mockup](docs/images/gui-orchestrator-main.png)
 
 ### VHDX conversion & dynamic resize modal
 
@@ -157,7 +176,7 @@ docs/images/             # Screenshots & diagrams
 
 ## Security
 
-- Bind defaults to `0.0.0.0:8787` in `./start.sh` — use firewall or `127.0.0.1` on untrusted networks.
+- `./start.sh` binds **0.0.0.0:8787** on Proxmox nodes and **127.0.0.1:8787** elsewhere — use a firewall, `LPMR_BIND`, or set **`LPMR_EXECUTE_TOKEN`** before exposing real execution on untrusted networks.
 - Destructive actions default to **dry-run**. Run the panel as root only when executing real mutations.
 
 ## License

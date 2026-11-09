@@ -7,10 +7,13 @@ use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
-use std::io::{self, stdout, Stdout};
+use std::io::{stdout, IsTerminal, Stdout};
 use std::time::Duration;
 
 pub fn run_tui() -> Result<()> {
+    if !stdout().is_terminal() {
+        anyhow::bail!("TUI requires an interactive terminal (run `lpmr tui` in SSH or a local console)");
+    }
     enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen)?;

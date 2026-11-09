@@ -4,6 +4,7 @@ use lpmr_core::themes::default_theme;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 pub type JobStore = Arc<RwLock<HashMap<String, JobRecord>>>;
 
@@ -13,6 +14,8 @@ pub struct AppState {
     pub default_theme_id: String,
     pub assets_dir: std::path::PathBuf,
     pub jobs: JobStore,
+    /// Same-origin CSRF secret for non-dry-run API calls (see `GET /api/session`).
+    pub execute_csrf: String,
 }
 
 impl AppState {
@@ -22,6 +25,7 @@ impl AppState {
             default_theme_id: default_theme().id,
             assets_dir,
             jobs: Arc::new(RwLock::new(HashMap::new())),
+            execute_csrf: Uuid::new_v4().to_string(),
         }
     }
 }

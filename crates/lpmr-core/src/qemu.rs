@@ -1,8 +1,9 @@
-use crate::tools::{run_command_ok, validate_block_path};
+use crate::tools::{run_command_ok, validate_block_path, validate_qemu_image_path, QemuPathRole};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum QemuFormat {
     Raw,
     Qcow2,
@@ -86,6 +87,8 @@ pub fn convert_image(
     to: QemuFormat,
     dry_run: bool,
 ) -> Result<String> {
+    validate_qemu_image_path(source, QemuPathRole::Source)?;
+    validate_qemu_image_path(dest, QemuPathRole::Dest)?;
     let mut args = vec!["convert", "-p", "-O", to.as_str()];
     if let Some(f) = from {
         args.push("-f");

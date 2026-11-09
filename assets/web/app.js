@@ -1,9 +1,30 @@
 /**
  * LPMR — Proxmox VE Storage Orchestrator (Raven // Baremetal UI)
  */
+const BUILTIN_UI_THEMES = new Set(["orange", "obsidian", "arctic"]);
+const VIEW_ORDER = ["disks", "vmimages", "lvm", "zfs", "health"];
+const VIEW_LABELS = {
+  disks: "Disks",
+  vmimages: "VM Images",
+  lvm: "LVM",
+  zfs: "ZFS Pools",
+  health: "Health Audit",
+};
+const LANGUAGES = [
+  ["en", "English"],
+  ["es", "Español"],
+  ["zh", "中文"],
+  ["hi", "हिन्दी"],
+  ["ar", "العربية"],
+  ["fr", "Français"],
+];
+
 const state = {
   view: "disks",
+  lang: localStorage.getItem("lpmr.lang") || "en",
   uiTheme: localStorage.getItem("lpmr.ui-theme") || "orange",
+  enterpriseThemes: [],
+  lvm: { available: false, pvs: [], vgs: [], lvs: [] },
   selectedDisk: null,
   telemetry: null,
   devices: [],
@@ -12,12 +33,17 @@ const state = {
   zfs: { available: false, pools: [] },
   health: null,
   tools: [],
+  /** Disk toolbar Mount/Format/Unmount (metrics strip toggle). */
   dryRun: true,
+  /** Convert/create modal only — never synced to dryRun. */
+  modalDryRun: true,
   log: [],
   modal: null,
   jobId: null,
   jobPct: 0,
+  jobPolling: false,
   search: "",
+  executeCsrf: null,
 };
 
 function esc(s) {
@@ -32,8 +58,40 @@ function fmt(b) {
   return i ? `${v.toFixed(2)} ${u[i]}` : `${b} ${u[0]}`;
 }
 
+async function resolveProxmoxVolidToPath(volidOrPath) {
+  const trimmed = (volidOrPath || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("/")) return trimmed;
+  if (trimmed.includes(":")) {
+    const r = await api(`/api/proxmox/resolve-path?volid=${encodeURIComponent(trimmed)}`);
+    return r.path;
+  }
+  return trimmed;
+}
+
+async function ensureExecuteCsrf() {
+  if (state.executeCsrf) return state.executeCsrf;
+  const s = await fetch("/api/session").then((r) => r.json());
+  state.executeCsrf = s.csrf;
+  return state.executeCsrf;
+}
+
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  opts = opts || {};
+  const headers = { ...(opts.headers || {}) };
+  if (opts.method === "POST" && opts.body) {
+    let dryRun = true;
+    try {
+      const parsed = JSON.parse(opts.body);
+      if (parsed.dry_run === false) dryRun = false;
+    } catch {
+      /* ignore */
+    }
+    if (!dryRun) {
+      headers["X-LPMR-CSRF"] = await ensureExecuteCsrf();
+    }
+  }
+  const r = await fetch(path, { ...opts, headers });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
@@ -54,13 +112,62 @@ function paintTerminal() {
     .join("");
 }
 
+function applyEnterprisePalette(theme) {
+  const root = document.documentElement;
+  root.style.setProperty("--bg", theme.window);
+  root.style.setProperty("--panel", theme.panel);
+  root.style.setProperty("--panel2", theme.panel);
+  root.style.setProperty("--border", theme.border);
+  root.style.setProperty("--text", theme.text);
+  root.style.setProperty("--accent", theme.accent);
+  root.style.setProperty("--accent2", theme.accent);
+  root.style.setProperty("--green", theme.success);
+  root.style.setProperty("--rose", theme.danger);
+}
+
 function setTheme(t) {
   state.uiTheme = t;
   localStorage.setItem("lpmr.ui-theme", t);
-  document.documentElement.setAttribute("data-ui-theme", t);
+  const root = document.documentElement;
+  if (BUILTIN_UI_THEMES.has(t)) {
+    root.removeAttribute("style");
+    root.setAttribute("data-ui-theme", t);
+  } else {
+    const ent = state.enterpriseThemes.find((th) => th.id === t);
+    root.setAttribute("data-ui-theme", "custom");
+    if (ent) applyEnterprisePalette(ent);
+  }
   document.querySelectorAll(".theme-switch button").forEach((b) => {
     b.classList.toggle("on", b.dataset.theme === t);
   });
+}
+
+function navLinkClass(view) {
+  return state.view === view ? "nav-link on" : "nav-link";
+}
+
+function themeButtonsHtml() {
+  return [
+    ["orange", "Orange"],
+    ["obsidian", "Obsidian"],
+    ["arctic", "Arctic"],
+  ]
+    .map(
+      ([id, label]) =>
+        `<button type="button" data-theme="${esc(id)}" class="${state.uiTheme === id ? "on" : ""}">${esc(label)}</button>`
+    )
+    .join("");
+}
+
+function switchView(view) {
+  state.view = view;
+  document.querySelectorAll("#tabBar button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.view === view);
+  });
+  document.querySelectorAll("[data-goto]").forEach((b) => {
+    b.classList.toggle("on", b.dataset.goto === view);
+  });
+  paintMain();
 }
 
 function render() {
@@ -69,40 +176,41 @@ function render() {
   app.innerHTML = `
     <header class="top-brand">
       <span class="badge-raven">RAVEN // BAREMETAL</span>
-      <h1>PROXMOX VE STORAGE ORCHESTRATOR</h1>
+      <h1>PROXMOX VE STORAGE ORCHESTRATOR<span class="badge-version">v0.1</span></h1>
       <div class="grow"></div>
       <input type="search" id="globalSearch" placeholder="Search nodes, pools, disks, VM images…" value="${esc(state.search)}"/>
       <button type="button" class="btn btn-ghost" id="btnTui">Open Terminal</button>
       <button type="button" class="btn btn-primary" id="btnCreateVol">+ Create Volume</button>
     </header>
     <nav class="tab-bar" id="tabBar">
-      ${["disks", "vmimages", "zfs", "health"].map((v) => `
-        <button type="button" data-view="${v}" class="${state.view === v ? "active" : ""}">${
-          { disks: "Disks", vmimages: "VM Images", zfs: "ZFS Pools", health: "Health Audit" }[v]
-        }</button>`).join("")}
+      ${VIEW_ORDER.map((v) => `
+        <button type="button" data-view="${v}" class="${state.view === v ? "active" : ""}">${VIEW_LABELS[v]}</button>`).join("")}
     </nav>
     <div class="metrics">
       <span class="metric-pill ok"><strong>${esc(host?.hostname || "node")}</strong> ONLINE · ${esc(host?.kernel || "linux")}</span>
       <span class="metric-pill"><strong>Rust RSS</strong> ${(host?.rss_mb ?? 0).toFixed(1)} MB</span>
       <span class="metric-pill"><strong>Devices</strong> ${state.devices.length}</span>
-      <span class="metric-pill"><strong>Tools</strong> ${state.tools.length}</span>
-      <span class="metric-pill"><strong>Dry-run</strong> ${state.dryRun ? "ON" : "OFF"}</span>
+      <span class="metric-pill"><strong>Tools</strong> ${state.health?.tools_ok?.length ?? state.tools.length}</span>
+      <span class="metric-pill metric-toggle ${state.dryRun ? "on" : ""}" id="dryToggle" title="Click to toggle dry-run">
+        <strong>Dry-run</strong> ${state.dryRun ? "ON" : "OFF"}
+      </span>
     </div>
     <div class="workspace">
       <aside class="col-nav">
         <h4>Storage infrastructure</h4>
-        <button type="button" class="nav-link on" data-goto="disks">Block Devices & NVMe</button>
-        <button type="button" class="nav-link" data-goto="vmimages">Proxmox VM Volumes</button>
-        <button type="button" class="nav-link" data-goto="zfs">ZFS Pools & Datasets</button>
+        <button type="button" class="${navLinkClass("disks")}" data-goto="disks">Block Devices & NVMe</button>
+        <button type="button" class="${navLinkClass("vmimages")}" data-goto="vmimages">Proxmox VM Volumes</button>
+        <button type="button" class="${navLinkClass("lvm")}" data-goto="lvm">LVM Volume Groups</button>
+        <button type="button" class="${navLinkClass("zfs")}" data-goto="zfs">ZFS Pools & Datasets</button>
+        <button type="button" class="${navLinkClass("health")}" data-goto="health">Health & Dependencies</button>
         <h4>Operations</h4>
         <button type="button" class="nav-link" id="openVhdx">VHDX Convert & Resize</button>
         <button type="button" class="nav-link" id="openRaw">RAW / QCOW2 Pipeline</button>
-        <h4>UI</h4>
-        <div class="theme-switch">
-          <button type="button" data-theme="orange" class="${state.uiTheme === "orange" ? "on" : ""}">Orange</button>
-          <button type="button" data-theme="obsidian" class="${state.uiTheme === "obsidian" ? "on" : ""}">Obsidian</button>
-          <button type="button" data-theme="arctic" class="${state.uiTheme === "arctic" ? "on" : ""}">Arctic</button>
-        </div>
+        <h4>Localization & UI</h4>
+        <select id="langSelect" class="lang-select" aria-label="Language">
+          ${LANGUAGES.map(([c, label]) => `<option value="${c}" ${state.lang === c ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+        <div class="theme-switch">${themeButtonsHtml()}</div>
       </aside>
       <main class="col-main" id="mainView"></main>
       <aside class="col-rail">
@@ -119,11 +227,34 @@ function render() {
     <div id="modalRoot"></div>`;
 
   document.querySelectorAll("#tabBar button").forEach((b) => {
-    b.onclick = () => { state.view = b.dataset.view; render(); bind(); paintMain(); };
+    b.onclick = () => switchView(b.dataset.view);
   });
   document.querySelectorAll("[data-goto]").forEach((b) => {
-    b.onclick = () => { state.view = b.dataset.goto; render(); bind(); paintMain(); };
+    b.onclick = () => switchView(b.dataset.goto);
   });
+  const dryToggle = document.getElementById("dryToggle");
+  if (dryToggle) {
+    dryToggle.onclick = () => {
+      state.dryRun = !state.dryRun;
+      dryToggle.classList.toggle("on", state.dryRun);
+      dryToggle.innerHTML = `<strong>Dry-run</strong> ${state.dryRun ? "ON" : "OFF"}`;
+      log(`Dry-run ${state.dryRun ? "enabled" : "disabled"}`, "warn");
+    };
+  }
+  const langSel = document.getElementById("langSelect");
+  if (langSel) {
+    langSel.onchange = async () => {
+      state.lang = langSel.value;
+      localStorage.setItem("lpmr.lang", state.lang);
+      document.documentElement.lang = state.lang;
+      try {
+        const bundle = await api(`/api/i18n/${state.lang}`);
+        log(`Language: ${bundle.lang}`, "info");
+      } catch (e) {
+        log(e.message, "warn");
+      }
+    };
+  }
   document.getElementById("btnTui").onclick = () => {
     log("Run on host: lpmr tui", "warn");
     alert("Native terminal UI: run `lpmr tui` on the Proxmox/Linux host.");
@@ -151,10 +282,20 @@ function bind() {
 function paintTools() {
   const grid = document.getElementById("toolGrid");
   if (!grid) return;
-  const list = state.health?.tools_ok || state.tools.map((t) => ({ name: t.name, ok: true }));
-  grid.innerHTML = (list || [])
-    .slice(0, 12)
-    .map((t) => `<div class="tool-chip ok"><span>${esc(t.name)}</span><span>OK</span></div>`)
+  const ok = (state.health?.tools_ok || state.tools.map((t) => ({ name: t.name }))).slice(0, 12);
+  const miss = (state.health?.tools_missing || []).slice(0, 6);
+  let chips = [
+    ...ok.map((t) => ({ name: t.name, ok: true })),
+    ...miss.map((t) => ({ name: t.name, ok: false })),
+  ];
+  if (!chips.length) {
+    chips = state.tools.slice(0, 12).map((t) => ({ name: t.name, ok: true }));
+  }
+  grid.innerHTML = chips
+    .map(
+      (t) =>
+        `<div class="tool-chip ${t.ok ? "ok" : "err"}"><span>${esc(t.name)}</span><span>${t.ok ? "OK" : "MISS"}</span></div>`
+    )
     .join("");
 }
 
@@ -163,6 +304,7 @@ function paintMain() {
   if (!main) return;
   if (state.view === "disks") main.innerHTML = viewDisks();
   else if (state.view === "vmimages") main.innerHTML = viewVm();
+  else if (state.view === "lvm") main.innerHTML = viewLvm();
   else if (state.view === "zfs") main.innerHTML = viewZfs();
   else main.innerHTML = viewHealth();
   bindMain();
@@ -192,7 +334,7 @@ function viewDisks() {
           <button type="button" class="btn btn-sm" data-op="Mount">Mount</button>
           <button type="button" class="btn btn-sm" data-op="FormatFilesystem">Format</button>
           <button type="button" class="btn btn-sm" data-op="Unmount">Unmount</button>
-          <button type="button" class="btn btn-sm btn-primary" data-op="ConvertImage">Convert image</button>
+          <button type="button" class="btn btn-sm btn-primary" data-open-convert="raw">Convert image</button>
         </div>
       </div>
     </div>
@@ -219,8 +361,50 @@ function viewVm() {
             ${rows.length ? rows.map((v) => `
               <tr>
                 <td>${esc(v.volid)}</td><td>${esc(v.format)}</td><td>${esc(v.size)}</td><td>${esc(v.storage)}</td>
-                <td><button type="button" class="btn btn-sm" data-convert="${esc(v.volid)}">Convert</button></td>
+                <td><button type="button" class="btn btn-sm" data-convert="${esc(v.volid)}" data-path="${esc(v.path || "")}">Convert</button></td>
               </tr>`).join("") : `<tr><td colspan="5" style="color:var(--muted)">No VM volumes (not on PVE or empty)</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function viewLvm() {
+  const snap = state.lvm || {};
+  if (!snap.available) {
+    return `
+      <div class="card">
+        <div class="card-head">LVM2 (pvs / vgs / lvs)</div>
+        <div class="card-body">
+          <p style="color:var(--muted)">LVM not detected. On Debian/Ubuntu: <code>apt install lvm2</code> or run <code>LPMR_INSTALL_DEPS=1 ./start.sh</code></p>
+        </div>
+      </div>`;
+  }
+  const vgs = snap.vgs || [];
+  const lvs = snap.lvs || [];
+  return `
+    <div class="card">
+      <div class="card-head">Volume groups</div>
+      <div class="card-body">
+        <table class="table">
+          <thead><tr><th>VG</th><th>Size</th><th>Free</th><th>PVs</th><th>LVs</th></tr></thead>
+          <tbody>
+            ${vgs.length ? vgs.map((v) => `
+              <tr><td>${esc(v.name)}</td><td>${esc(v.size)}</td><td>${esc(v.free)}</td><td>${esc(v.pvs)}</td><td>${esc(v.lvs)}</td></tr>`).join("")
+              : `<tr><td colspan="5" style="color:var(--muted)">No volume groups</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">Logical volumes</div>
+      <div class="card-body" style="padding:0">
+        <table class="table">
+          <thead><tr><th>LV</th><th>VG</th><th>Size</th><th>Path</th></tr></thead>
+          <tbody>
+            ${lvs.length ? lvs.map((v) => `
+              <tr><td>${esc(v.name)}</td><td>${esc(v.vg)}</td><td>${esc(v.size)}</td><td>${esc(v.path)}</td></tr>`).join("")
+              : `<tr><td colspan="4" style="color:var(--muted)">No logical volumes</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -245,11 +429,18 @@ function viewZfs() {
 function viewHealth() {
   const h = state.health;
   if (!h) return `<p class="empty">Loading…</p>`;
+  const entThemes = (state.enterpriseThemes || [])
+    .map(
+      (th) =>
+        `<button type="button" class="btn btn-sm" data-theme="${esc(th.id)}">${esc(th.name)}</button>`
+    )
+    .join("");
   return `
     <div class="modal-grid">
       <div class="card"><div class="card-head">Devices</div><div class="card-body">${h.device_count} top-level block devices</div></div>
       <div class="card"><div class="card-head">Proxmox</div><div class="card-body">${h.proxmox ? "pvesm detected" : "Not a PVE node"}</div></div>
-      <div class="card"><div class="card-head">Missing tools</div><div class="card-body"><ul>${(h.tools_missing || []).map((t) => `<li>${esc(t.name)}</li>`).join("") || "<li>None</li>"}</ul></div></div>
+      <div class="card"><div class="card-head">Missing tools</div><div class="card-body"><ul>${(h.tools_missing || []).map((t) => `<li>${esc(t.name)} — ${esc(t.purpose || "")}</li>`).join("") || "<li>None</li>"}</ul></div></div>
+      <div class="card"><div class="card-head">Enterprise palettes</div><div class="card-body"><div class="btn-row">${entThemes || "<span style='color:var(--muted)'>Defaults: Orange / Obsidian / Arctic</span>"}</div></div></div>
     </div>`;
 }
 
@@ -261,11 +452,33 @@ function bindMain() {
       paintMain();
     };
   });
+  document.querySelectorAll("[data-open-convert]").forEach((el) => {
+    el.onclick = () => {
+      if (!state.selectedDisk) {
+        log("Select a disk first", "warn");
+        return;
+      }
+      state.convertSource = state.selectedDisk;
+      openModal(el.dataset.openConvert || "raw");
+    };
+  });
   document.querySelectorAll("[data-op]").forEach((el) => {
     el.onclick = () => runOp(el.dataset.op);
   });
   document.querySelectorAll("[data-convert]").forEach((el) => {
-    el.onclick = () => { state.convertSource = el.dataset.convert; openModal("vhdx"); };
+    el.onclick = async () => {
+      const volid = el.dataset.convert;
+      try {
+        state.convertSource = await resolveProxmoxVolidToPath(volid);
+        log(`Resolved ${volid} → ${state.convertSource}`, "info");
+        openModal("vhdx");
+      } catch (e) {
+        log(`Could not resolve ${volid}: ${e.message}`, "warn");
+      }
+    };
+  });
+  document.querySelectorAll("[data-theme]").forEach((el) => {
+    if (el.closest(".btn-row")) el.onclick = () => setTheme(el.dataset.theme);
   });
 }
 
@@ -279,6 +492,11 @@ async function loadPartitionMap() {
 }
 
 async function runOp(kind) {
+  if (kind === "ConvertImage") {
+    if (state.selectedDisk) state.convertSource = state.selectedDisk;
+    openModal("raw");
+    return;
+  }
   const device = state.selectedDisk;
   if (!device) { log("Select a disk first", "warn"); return; }
   try {
@@ -293,10 +511,14 @@ async function runOp(kind) {
 
 function openModal(kind) {
   state.modal = kind;
+  state.modalDryRun = true;
   renderModal();
 }
 
 function closeModal() {
+  if (state.jobPolling && state.jobId) {
+    log(`Job ${state.jobId} still running — progress updates continue in the log`, "info");
+  }
   state.modal = null;
   renderModal();
 }
@@ -314,14 +536,15 @@ function renderModal() {
           <button type="button" class="btn btn-sm" id="modalClose">✕</button>
         </div>
         <div class="modal-body form">
-          <label>Source path<input id="mSource" value="${esc(state.convertSource || "")}" placeholder="/path/source.vhdx"/></label>
-          <label>Destination<input id="mDest" placeholder="/var/lib/vz/images/out.qcow2"/></label>
-          <label>Output format<select id="mFmt"><option>qcow2</option><option>raw</option><option>vmdk</option></select></label>
-          <label><input type="checkbox" id="mDry" ${state.dryRun ? "checked" : ""}/> Dry-run (recommended)</label>
+          ${state.modal !== "create" ? `<label>Source path<input id="mSource" value="${esc(state.convertSource || "")}" placeholder="/path/source.vhdx"/></label>` : ""}
+          <label>${state.modal === "create" ? "Image path" : "Destination"}<input id="mDest" placeholder="${state.modal === "create" ? "/var/lib/vz/images/new.qcow2" : "/var/lib/vz/images/out.qcow2"}"/></label>
+          ${state.modal === "create" ? `<label>Size<input id="mSize" value="32G" placeholder="32G"/></label>` : ""}
+          <label>Output format<select id="mFmt"><option>qcow2</option><option>raw</option><option>vmdk</option><option>vhdx</option></select></label>
+          <label><input type="checkbox" id="mDry" ${state.modalDryRun ? "checked" : ""}/> Dry-run for this job only (disk Mount/Format use header toggle)</label>
           ${state.jobId ? `<div class="progress-bar"><div class="progress-fill" style="width:${state.jobPct}%"></div></div>` : ""}
           <div class="btn-row" style="margin-top:16px">
             <button type="button" class="btn" id="modalCancel">Cancel</button>
-            <button type="button" class="btn btn-primary" id="modalRun">Start conversion</button>
+            <button type="button" class="btn btn-primary" id="modalRun" ${state.jobPolling ? "disabled" : ""}>${state.modal === "create" ? "Create image" : "Start conversion"}</button>
           </div>
         </div>
       </div>
@@ -333,18 +556,65 @@ function renderModal() {
   if (bg) bg.addEventListener("click", (e) => { if (e.target.id === "modalBg") closeModal(); });
   if (closeBtn) closeBtn.onclick = closeModal;
   if (cancelBtn) cancelBtn.onclick = closeModal;
-  if (runBtn) runBtn.onclick = () => submitJob();
+  if (runBtn) {
+    runBtn.onclick = () => {
+      if (state.modal === "create") submitCreateVolume();
+      else submitConvertJob();
+    };
+  }
   const dry = document.getElementById("mDry");
-  if (dry) dry.onchange = () => { state.dryRun = dry.checked; };
+  if (dry) {
+    dry.onchange = () => {
+      state.modalDryRun = dry.checked;
+    };
+  }
 }
 
-async function submitJob() {
-  const source = document.getElementById("mSource")?.value?.trim();
-  const dest = document.getElementById("mDest")?.value?.trim();
+async function submitCreateVolume() {
+  const path = document.getElementById("mDest")?.value?.trim();
   const format = document.getElementById("mFmt")?.value || "qcow2";
-  if (!source || !dest) { log("Source and destination required", "warn"); return; }
-  const dry = document.getElementById("mDry")?.checked ?? true;
+  state.modalDryRun = document.getElementById("mDry")?.checked ?? true;
+  const dry = state.modalDryRun;
+  if (!path) {
+    log("Image path required", "warn");
+    return;
+  }
+  const size = document.getElementById("mSize")?.value?.trim() || "32G";
   try {
+    const r = await api("/api/operations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "CreateImage",
+        dry_run: dry,
+        path,
+        size,
+        image_format: format,
+      }),
+    });
+    log(r.command, r.message === "dry-run" ? "warn" : "info");
+    closeModal();
+  } catch (e) {
+    log(e.message, "warn");
+  }
+}
+
+async function submitConvertJob() {
+  if (state.jobPolling) {
+    log("A conversion is already in progress", "warn");
+    return;
+  }
+  const dest = document.getElementById("mDest")?.value?.trim();
+  let source = document.getElementById("mSource")?.value?.trim();
+  const format = document.getElementById("mFmt")?.value || "qcow2";
+  state.modalDryRun = document.getElementById("mDry")?.checked ?? true;
+  const dry = state.modalDryRun;
+  if (!source || !dest) {
+    log("Source and destination required", "warn");
+    return;
+  }
+  try {
+    source = await resolveProxmoxVolidToPath(source);
     const job = await api("/api/jobs/convert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -360,37 +630,94 @@ async function submitJob() {
 }
 
 async function pollJob(id) {
-  for (let i = 0; i < 120; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-    const job = await api(`/api/jobs/${id}`);
-    state.jobPct = job.progress_pct || 0;
-    job.logs?.slice(-3).forEach((l) => log(l, "info"));
-    renderModal();
-    if (job.status === "done" || job.status === "failed") {
-      log(job.message, job.status === "done" ? "info" : "warn");
-      state.jobId = null;
-      closeModal();
-      return;
+  state.jobPolling = true;
+  state.jobId = id;
+  renderModal();
+  try {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1000));
+      let job;
+      try {
+        job = await api(`/api/jobs/${id}`);
+      } catch (e) {
+        log(e.message, "warn");
+        continue;
+      }
+      state.jobPct = job.progress_pct || 0;
+      const tail = job.logs?.slice(-1) || [];
+      tail.forEach((l) => log(l, "info"));
+      if (state.modal) renderModal();
+      if (job.status === "done" || job.status === "failed") {
+        log(job.message, job.status === "done" ? "info" : "warn");
+        closeModal();
+        return;
+      }
     }
+  } finally {
+    state.jobPolling = false;
+    state.jobId = null;
+  }
+}
+
+async function refreshPart(label, fn, onError) {
+  try {
+    await fn();
+  } catch (e) {
+    log(`${label}: ${e.message}`, "warn");
+    if (typeof onError === "function") onError();
   }
 }
 
 async function refresh() {
   log("Refreshing telemetry…", "info");
-  state.telemetry = await api("/api/telemetry");
-  const dev = await api("/api/devices");
-  state.devices = dev.devices || [];
-  if (!state.selectedDisk && state.devices[0]) state.selectedDisk = state.devices[0].path;
-  state.tools = (await api("/api/tools")).tools || [];
-  state.health = await api("/api/health-audit");
-  state.zfs = await api("/api/zfs/pools");
-  state.vmVolumes = (await api("/api/vm-volumes")).volumes || [];
-  await loadPartitionMap();
-  paintTools();
-  document.querySelectorAll(".metric-pill strong");
-  render();
-  bind();
-  log("Refresh complete", "info");
+  try {
+  await refreshPart("telemetry", async () => {
+    state.telemetry = await api("/api/telemetry");
+  });
+  await refreshPart("devices", async () => {
+    const dev = await api("/api/devices");
+    state.devices = dev.devices || [];
+    if (dev.error) log(`devices: ${dev.error}`, "warn");
+    if (!state.selectedDisk && state.devices[0]) state.selectedDisk = state.devices[0].path;
+  }, () => {
+    state.devices = [];
+  });
+  await refreshPart("tools", async () => {
+    state.tools = (await api("/api/tools")).tools || [];
+  });
+  await refreshPart("themes", async () => {
+    state.enterpriseThemes = (await api("/api/themes")).themes || [];
+  });
+  await refreshPart("health", async () => {
+    state.health = await api("/api/health-audit");
+  });
+  await refreshPart("zfs", async () => {
+    const zfs = await api("/api/zfs/pools");
+    state.zfs = zfs;
+    if (zfs.error) log(`zfs: ${zfs.error}`, "warn");
+  }, () => {
+    state.zfs = { available: false, pools: [] };
+  });
+  await refreshPart("lvm", async () => {
+    state.lvm = await api("/api/lvm");
+  }, () => {
+    state.lvm = { available: false, pvs: [], vgs: [], lvs: [] };
+  });
+  await refreshPart("vm-volumes", async () => {
+    const vm = await api("/api/vm-volumes");
+    state.vmVolumes = vm.volumes || [];
+    if (vm.error) log(`vm-volumes: ${vm.error}`, "warn");
+  }, () => {
+    state.vmVolumes = [];
+  });
+  await refreshPart("partitions", () => loadPartitionMap());
+  } finally {
+    paintTools();
+    render();
+    bind();
+    setTheme(state.uiTheme);
+    log("Refresh complete", "info");
+  }
 }
 
 (async function boot() {
@@ -398,6 +725,7 @@ async function refresh() {
   render();
   bind();
   try {
+    await ensureExecuteCsrf();
     await refresh();
     setInterval(() => api("/api/telemetry").then((t) => { state.telemetry = t; }).catch(() => {}), 15000);
   } catch (e) {
