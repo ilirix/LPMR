@@ -290,22 +290,7 @@ async fn job_convert(
         let job_id = id.clone();
         let format = req.format.unwrap_or_else(|| "qcow2".into());
         tokio::spawn(async move {
-            let result = run_convert_async(source, dest, format, |pct, line| {
-                let jobs = jobs.clone();
-                let job_id = job_id.clone();
-                let line = line.to_string();
-                tokio::spawn(async move {
-                    let mut map = jobs.write().await;
-                    if let Some(job) = map.get_mut(&job_id) {
-                        job.progress_pct = pct;
-                        job.message = format!("converting ({pct:.1}%)");
-                        if job.logs.last() != Some(&line) {
-                            job.logs.push(line);
-                        }
-                    }
-                });
-            })
-            .await;
+            let result = run_convert_async(source, dest, format, jobs.clone(), job_id.clone()).await;
             let mut map = jobs.write().await;
             if let Some(job) = map.get_mut(&job_id) {
                 match result {
