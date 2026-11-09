@@ -12,10 +12,8 @@ rm -rf "$DEST"
 git clone --depth 1 --branch "$BRANCH" https://github.com/ilirix/LPMR.git "$DEST"
 cd "$DEST"
 
-if ! command -v cargo >/dev/null; then
-  echo "error: rustc/cargo not installed (curl https://sh.rustup.rs | sh)"
-  exit 1
-fi
+# shellcheck source=/dev/null
+source "$DEST/scripts/ensure-rust.sh"
 
 cargo build --release
 ./target/release/lpmr doctor || true

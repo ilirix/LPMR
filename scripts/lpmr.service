@@ -1,0 +1,15 @@
+[Unit]
+Description=LPMR web orchestrator
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/LPMR
+Environment=LPMR_BIND=0.0.0.0:8787
+# Set LPMR_EXECUTE_TOKEN in an EnvironmentFile for remote execution (see docs)
+ExecStart=/opt/LPMR/target/release/lpmr web --bind ${LPMR_BIND}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
