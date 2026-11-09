@@ -33,7 +33,9 @@ const state = {
   zfs: { available: false, pools: [] },
   health: null,
   tools: [],
+  /** Disk toolbar Mount/Format/Unmount (metrics strip toggle). */
   dryRun: true,
+  /** Convert/create modal only — never synced to dryRun. */
   modalDryRun: true,
   log: [],
   modal: null,
@@ -535,7 +537,7 @@ function renderModal() {
           <label>${state.modal === "create" ? "Image path" : "Destination"}<input id="mDest" placeholder="${state.modal === "create" ? "/var/lib/vz/images/new.qcow2" : "/var/lib/vz/images/out.qcow2"}"/></label>
           ${state.modal === "create" ? `<label>Size<input id="mSize" value="32G" placeholder="32G"/></label>` : ""}
           <label>Output format<select id="mFmt"><option>qcow2</option><option>raw</option><option>vmdk</option><option>vhdx</option></select></label>
-          <label><input type="checkbox" id="mDry" ${state.modalDryRun ? "checked" : ""}/> Dry-run (recommended)</label>
+          <label><input type="checkbox" id="mDry" ${state.modalDryRun ? "checked" : ""}/> Dry-run for this job only (disk Mount/Format use header toggle)</label>
           ${state.jobId ? `<div class="progress-bar"><div class="progress-fill" style="width:${state.jobPct}%"></div></div>` : ""}
           <div class="btn-row" style="margin-top:16px">
             <button type="button" class="btn" id="modalCancel">Cancel</button>
@@ -558,13 +560,18 @@ function renderModal() {
     };
   }
   const dry = document.getElementById("mDry");
-  if (dry) dry.onchange = () => { state.modalDryRun = dry.checked; };
+  if (dry) {
+    dry.onchange = () => {
+      state.modalDryRun = dry.checked;
+    };
+  }
 }
 
 async function submitCreateVolume() {
   const path = document.getElementById("mDest")?.value?.trim();
   const format = document.getElementById("mFmt")?.value || "qcow2";
-  const dry = document.getElementById("mDry")?.checked ?? true;
+  state.modalDryRun = document.getElementById("mDry")?.checked ?? true;
+  const dry = state.modalDryRun;
   if (!path) {
     log("Image path required", "warn");
     return;
@@ -593,7 +600,8 @@ async function submitConvertJob() {
   const dest = document.getElementById("mDest")?.value?.trim();
   let source = document.getElementById("mSource")?.value?.trim();
   const format = document.getElementById("mFmt")?.value || "qcow2";
-  const dry = document.getElementById("mDry")?.checked ?? true;
+  state.modalDryRun = document.getElementById("mDry")?.checked ?? true;
+  const dry = state.modalDryRun;
   if (!source || !dest) {
     log("Source and destination required", "warn");
     return;
