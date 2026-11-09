@@ -3,8 +3,8 @@ use crate::jobs::run_convert_async;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Json};
-use axum::routing::{get, post};
+use axum::response::{IntoResponse, Json};
+use axum::routing::{get, get_service, post};
 use axum::Router;
 use lpmr_core::devices::{scan_block_devices, BlockDeviceTree};
 use lpmr_core::i18n::{Language, translate};
@@ -20,11 +20,6 @@ use lpmr_core::zfs::{list_pools, zfs_available};
 use serde::Deserialize;
 use serde_json::json;
 use tower_http::services::{ServeDir, ServeFile};
-
-#[derive(Deserialize)]
-struct LangQuery {
-    lang: Option<String>,
-}
 
 #[derive(Deserialize)]
 struct ImageQuery {
@@ -72,10 +67,11 @@ pub fn api_router() -> Router<AppState> {
 
 pub fn static_router(assets_dir: std::path::PathBuf) -> Router<AppState> {
     let web_root = assets_dir.join("web");
+    let index_page = web_root.join("index.html");
     Router::new()
-        .route("/", get(index))
+        .route_service("/", get_service(ServeFile::new(index_page.clone())))
         .nest_service("/assets", ServeDir::new(web_root.clone()))
-        .fallback_service(ServeFile::new(web_root.join("index.html")))
+        .fallback_service(ServeFile::new(index_page))
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -293,32 +289,6 @@ async fn run_operation(Json(body): Json<OpBody>) -> Result<Json<serde_json::Valu
     };
     let result = execute(req)?;
     Ok(Json(json!(result)))
-}
-
-async fn index(State(state): State<AppState>, Query(q): Query<LangQuery>) -> Html<String> {
-    let lang = q
-        .lang
-        .as_deref()
-        .map(Language::from_code)
-        .unwrap_or(state.default_lang);
-    let title = translate(lang, "app.title");
-    Html(format!(
-        r#"<!DOCTYPE html>
-<html lang="{}">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>{title}</title>
-  <link rel="stylesheet" href="/assets/app.css?v=6"/>
-</head>
-<body>
-  <div id="app" data-lang="{}" data-theme="orange"></div>
-  <script src="/assets/app.js?v=6"></script>
-</body>
-</html>"#,
-        lang.code(),
-        lang.code()
-    ))
 }
 
 #[derive(Debug)]

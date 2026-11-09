@@ -2,11 +2,29 @@
  * LPMR — Proxmox VE Storage Orchestrator (Raven // Baremetal UI)
  */
 const BUILTIN_UI_THEMES = new Set(["orange", "obsidian", "arctic"]);
+const VIEW_ORDER = ["disks", "vmimages", "lvm", "zfs", "health"];
+const VIEW_LABELS = {
+  disks: "Disks",
+  vmimages: "VM Images",
+  lvm: "LVM",
+  zfs: "ZFS Pools",
+  health: "Health Audit",
+};
+const LANGUAGES = [
+  ["en", "English"],
+  ["es", "Español"],
+  ["zh", "中文"],
+  ["hi", "हिन्दी"],
+  ["ar", "العربية"],
+  ["fr", "Français"],
+];
 
 const state = {
   view: "disks",
+  lang: localStorage.getItem("lpmr.lang") || "en",
   uiTheme: localStorage.getItem("lpmr.ui-theme") || "orange",
   enterpriseThemes: [],
+  lvm: { available: false, pvs: [], vgs: [], lvs: [] },
   selectedDisk: null,
   telemetry: null,
   devices: [],
@@ -87,19 +105,32 @@ function setTheme(t) {
   });
 }
 
+function navLinkClass(view) {
+  return state.view === view ? "nav-link on" : "nav-link";
+}
+
 function themeButtonsHtml() {
-  const builtins = [
+  return [
     ["orange", "Orange"],
     ["obsidian", "Obsidian"],
     ["arctic", "Arctic"],
-  ];
-  const ent = (state.enterpriseThemes || []).map((th) => [th.id, th.name]);
-  return [...builtins, ...ent]
+  ]
     .map(
       ([id, label]) =>
         `<button type="button" data-theme="${esc(id)}" class="${state.uiTheme === id ? "on" : ""}">${esc(label)}</button>`
     )
     .join("");
+}
+
+function switchView(view) {
+  state.view = view;
+  document.querySelectorAll("#tabBar button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.view === view);
+  });
+  document.querySelectorAll("[data-goto]").forEach((b) => {
+    b.classList.toggle("on", b.dataset.goto === view);
+  });
+  paintMain();
 }
 
 function render() {
@@ -108,35 +139,40 @@ function render() {
   app.innerHTML = `
     <header class="top-brand">
       <span class="badge-raven">RAVEN // BAREMETAL</span>
-      <h1>PROXMOX VE STORAGE ORCHESTRATOR</h1>
+      <h1>PROXMOX VE STORAGE ORCHESTRATOR<span class="badge-version">v0.1</span></h1>
       <div class="grow"></div>
       <input type="search" id="globalSearch" placeholder="Search nodes, pools, disks, VM images…" value="${esc(state.search)}"/>
       <button type="button" class="btn btn-ghost" id="btnTui">Open Terminal</button>
       <button type="button" class="btn btn-primary" id="btnCreateVol">+ Create Volume</button>
     </header>
     <nav class="tab-bar" id="tabBar">
-      ${["disks", "vmimages", "zfs", "health"].map((v) => `
-        <button type="button" data-view="${v}" class="${state.view === v ? "active" : ""}">${
-          { disks: "Disks", vmimages: "VM Images", zfs: "ZFS Pools", health: "Health Audit" }[v]
-        }</button>`).join("")}
+      ${VIEW_ORDER.map((v) => `
+        <button type="button" data-view="${v}" class="${state.view === v ? "active" : ""}">${VIEW_LABELS[v]}</button>`).join("")}
     </nav>
     <div class="metrics">
       <span class="metric-pill ok"><strong>${esc(host?.hostname || "node")}</strong> ONLINE · ${esc(host?.kernel || "linux")}</span>
       <span class="metric-pill"><strong>Rust RSS</strong> ${(host?.rss_mb ?? 0).toFixed(1)} MB</span>
       <span class="metric-pill"><strong>Devices</strong> ${state.devices.length}</span>
-      <span class="metric-pill"><strong>Tools</strong> ${state.tools.length}</span>
-      <span class="metric-pill"><strong>Dry-run</strong> ${state.dryRun ? "ON" : "OFF"}</span>
+      <span class="metric-pill"><strong>Tools</strong> ${state.health?.tools_ok?.length ?? state.tools.length}</span>
+      <span class="metric-pill metric-toggle ${state.dryRun ? "on" : ""}" id="dryToggle" title="Click to toggle dry-run">
+        <strong>Dry-run</strong> ${state.dryRun ? "ON" : "OFF"}
+      </span>
     </div>
     <div class="workspace">
       <aside class="col-nav">
         <h4>Storage infrastructure</h4>
-        <button type="button" class="nav-link on" data-goto="disks">Block Devices & NVMe</button>
-        <button type="button" class="nav-link" data-goto="vmimages">Proxmox VM Volumes</button>
-        <button type="button" class="nav-link" data-goto="zfs">ZFS Pools & Datasets</button>
+        <button type="button" class="${navLinkClass("disks")}" data-goto="disks">Block Devices & NVMe</button>
+        <button type="button" class="${navLinkClass("vmimages")}" data-goto="vmimages">Proxmox VM Volumes</button>
+        <button type="button" class="${navLinkClass("lvm")}" data-goto="lvm">LVM Volume Groups</button>
+        <button type="button" class="${navLinkClass("zfs")}" data-goto="zfs">ZFS Pools & Datasets</button>
+        <button type="button" class="${navLinkClass("health")}" data-goto="health">Health & Dependencies</button>
         <h4>Operations</h4>
         <button type="button" class="nav-link" id="openVhdx">VHDX Convert & Resize</button>
         <button type="button" class="nav-link" id="openRaw">RAW / QCOW2 Pipeline</button>
-        <h4>UI</h4>
+        <h4>Localization & UI</h4>
+        <select id="langSelect" class="lang-select" aria-label="Language">
+          ${LANGUAGES.map(([c, label]) => `<option value="${c}" ${state.lang === c ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
         <div class="theme-switch">${themeButtonsHtml()}</div>
       </aside>
       <main class="col-main" id="mainView"></main>
@@ -154,11 +190,34 @@ function render() {
     <div id="modalRoot"></div>`;
 
   document.querySelectorAll("#tabBar button").forEach((b) => {
-    b.onclick = () => { state.view = b.dataset.view; render(); bind(); paintMain(); };
+    b.onclick = () => switchView(b.dataset.view);
   });
   document.querySelectorAll("[data-goto]").forEach((b) => {
-    b.onclick = () => { state.view = b.dataset.goto; render(); bind(); paintMain(); };
+    b.onclick = () => switchView(b.dataset.goto);
   });
+  const dryToggle = document.getElementById("dryToggle");
+  if (dryToggle) {
+    dryToggle.onclick = () => {
+      state.dryRun = !state.dryRun;
+      dryToggle.classList.toggle("on", state.dryRun);
+      dryToggle.innerHTML = `<strong>Dry-run</strong> ${state.dryRun ? "ON" : "OFF"}`;
+      log(`Dry-run ${state.dryRun ? "enabled" : "disabled"}`, "warn");
+    };
+  }
+  const langSel = document.getElementById("langSelect");
+  if (langSel) {
+    langSel.onchange = async () => {
+      state.lang = langSel.value;
+      localStorage.setItem("lpmr.lang", state.lang);
+      document.documentElement.lang = state.lang;
+      try {
+        const bundle = await api(`/api/i18n/${state.lang}`);
+        log(`Language: ${bundle.lang}`, "info");
+      } catch (e) {
+        log(e.message, "warn");
+      }
+    };
+  }
   document.getElementById("btnTui").onclick = () => {
     log("Run on host: lpmr tui", "warn");
     alert("Native terminal UI: run `lpmr tui` on the Proxmox/Linux host.");
@@ -186,8 +245,8 @@ function bind() {
 function paintTools() {
   const grid = document.getElementById("toolGrid");
   if (!grid) return;
-  const ok = (state.health?.tools_ok || []).slice(0, 8);
-  const miss = (state.health?.tools_missing || []).slice(0, 8);
+  const ok = (state.health?.tools_ok || state.tools.map((t) => ({ name: t.name }))).slice(0, 12);
+  const miss = (state.health?.tools_missing || []).slice(0, 6);
   let chips = [
     ...ok.map((t) => ({ name: t.name, ok: true })),
     ...miss.map((t) => ({ name: t.name, ok: false })),
@@ -208,6 +267,7 @@ function paintMain() {
   if (!main) return;
   if (state.view === "disks") main.innerHTML = viewDisks();
   else if (state.view === "vmimages") main.innerHTML = viewVm();
+  else if (state.view === "lvm") main.innerHTML = viewLvm();
   else if (state.view === "zfs") main.innerHTML = viewZfs();
   else main.innerHTML = viewHealth();
   bindMain();
@@ -272,6 +332,48 @@ function viewVm() {
     </div>`;
 }
 
+function viewLvm() {
+  const snap = state.lvm || {};
+  if (!snap.available) {
+    return `
+      <div class="card">
+        <div class="card-head">LVM2 (pvs / vgs / lvs)</div>
+        <div class="card-body">
+          <p style="color:var(--muted)">LVM not detected. On Debian/Ubuntu: <code>apt install lvm2</code> or run <code>LPMR_INSTALL_DEPS=1 ./start.sh</code></p>
+        </div>
+      </div>`;
+  }
+  const vgs = snap.vgs || [];
+  const lvs = snap.lvs || [];
+  return `
+    <div class="card">
+      <div class="card-head">Volume groups</div>
+      <div class="card-body">
+        <table class="table">
+          <thead><tr><th>VG</th><th>Size</th><th>Free</th><th>PVs</th><th>LVs</th></tr></thead>
+          <tbody>
+            ${vgs.length ? vgs.map((v) => `
+              <tr><td>${esc(v.name)}</td><td>${esc(v.size)}</td><td>${esc(v.free)}</td><td>${esc(v.pvs)}</td><td>${esc(v.lvs)}</td></tr>`).join("")
+              : `<tr><td colspan="5" style="color:var(--muted)">No volume groups</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">Logical volumes</div>
+      <div class="card-body" style="padding:0">
+        <table class="table">
+          <thead><tr><th>LV</th><th>VG</th><th>Size</th><th>Path</th></tr></thead>
+          <tbody>
+            ${lvs.length ? lvs.map((v) => `
+              <tr><td>${esc(v.name)}</td><td>${esc(v.vg)}</td><td>${esc(v.size)}</td><td>${esc(v.path)}</td></tr>`).join("")
+              : `<tr><td colspan="4" style="color:var(--muted)">No logical volumes</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function viewZfs() {
   const pools = state.zfs.pools || [];
   return `
@@ -290,11 +392,18 @@ function viewZfs() {
 function viewHealth() {
   const h = state.health;
   if (!h) return `<p class="empty">Loading…</p>`;
+  const entThemes = (state.enterpriseThemes || [])
+    .map(
+      (th) =>
+        `<button type="button" class="btn btn-sm" data-theme="${esc(th.id)}">${esc(th.name)}</button>`
+    )
+    .join("");
   return `
     <div class="modal-grid">
       <div class="card"><div class="card-head">Devices</div><div class="card-body">${h.device_count} top-level block devices</div></div>
       <div class="card"><div class="card-head">Proxmox</div><div class="card-body">${h.proxmox ? "pvesm detected" : "Not a PVE node"}</div></div>
-      <div class="card"><div class="card-head">Missing tools</div><div class="card-body"><ul>${(h.tools_missing || []).map((t) => `<li>${esc(t.name)}</li>`).join("") || "<li>None</li>"}</ul></div></div>
+      <div class="card"><div class="card-head">Missing tools</div><div class="card-body"><ul>${(h.tools_missing || []).map((t) => `<li>${esc(t.name)} — ${esc(t.purpose || "")}</li>`).join("") || "<li>None</li>"}</ul></div></div>
+      <div class="card"><div class="card-head">Enterprise palettes</div><div class="card-body"><div class="btn-row">${entThemes || "<span style='color:var(--muted)'>Defaults: Orange / Obsidian / Arctic</span>"}</div></div></div>
     </div>`;
 }
 
@@ -314,6 +423,9 @@ function bindMain() {
   });
   document.querySelectorAll("[data-convert]").forEach((el) => {
     el.onclick = () => { state.convertSource = el.dataset.convert; openModal("vhdx"); };
+  });
+  document.querySelectorAll("[data-theme]").forEach((el) => {
+    if (el.closest(".btn-row")) el.onclick = () => setTheme(el.dataset.theme);
   });
 }
 
@@ -465,6 +577,7 @@ async function refresh() {
   state.enterpriseThemes = (await api("/api/themes")).themes || [];
   state.health = await api("/api/health-audit");
   state.zfs = await api("/api/zfs/pools");
+  state.lvm = await api("/api/lvm");
   state.vmVolumes = (await api("/api/vm-volumes")).volumes || [];
   await loadPartitionMap();
   paintTools();

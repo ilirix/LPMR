@@ -6,10 +6,16 @@ Lightweight **Rust** control plane for Linux block storage, partitions, LVM, LUK
 
 ## Quick start (one script)
 
+Clone the branch with the full orchestrator UI (until merged to `main`):
+
 ```bash
+git clone --branch cursor/lpmr-volume-panel-5c83 https://github.com/ilirix/LPMR.git
+cd LPMR
 chmod +x start.sh
 ./start.sh
 ```
+
+Fresh Debian smoke test: `chmod +x scripts/debian-fresh-test.sh && ./scripts/debian-fresh-test.sh`
 
 Open **http://localhost:8787** (bind override: `LPMR_BIND=127.0.0.1:8787 ./start.sh`).
 
@@ -25,9 +31,15 @@ cargo build --release
 
 ## GUI screenshots
 
-### Main orchestrator (disks, partition visualizer, toolchain audit, log)
+> **Note:** `docs/images/gui-orchestrator-main.png` is a **design target** (future cluster / `io_uring` panels). The **shipped web UI** is the **Raven // Baremetal** three-column orchestrator below (same layout as a Proxmox node with `install-deps`).
 
-![Main orchestrator](docs/images/gui-orchestrator-main.png)
+### Live orchestrator (disks, partition visualizer, toolchain audit, log)
+
+![Live orchestrator UI](docs/images/gui-orchestrator-live.png)
+
+### Design reference (roadmap mockup)
+
+![Design target mockup](docs/images/gui-orchestrator-main.png)
 
 ### VHDX conversion & dynamic resize modal
 

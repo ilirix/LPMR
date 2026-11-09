@@ -149,7 +149,39 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .modal-header h2 { margin: 0; font-size: 14px; color: var(--accent); }
 .modal-body { padding: 16px 20px; }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-@media (max-width: 800px) { .workspace { grid-template-columns: 1fr; } .col-nav, .col-rail { display: none; } .modal-grid { grid-template-columns: 1fr; } }
+.metric-pill.metric-toggle { cursor: pointer; user-select: none; }
+.metric-pill.metric-toggle:hover { border-color: var(--accent); }
+.metric-pill.metric-toggle.on strong { color: var(--cyan); }
+
+.lang-select {
+  padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-size: 11px; margin-bottom: 8px; width: 100%;
+}
+
+.badge-version {
+  font-size: 9px; font-family: var(--mono); color: var(--muted); margin-left: 8px;
+}
+
+@media (max-width: 1200px) {
+  .workspace { grid-template-columns: 200px 1fr 280px; }
+}
+@media (max-width: 960px) {
+  .workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(280px, 1fr) auto;
+  }
+  .col-nav {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 220px;
+  }
+  .col-rail {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    max-height: min(42vh, 360px);
+  }
+  .modal-grid { grid-template-columns: 1fr; }
+}
 
 .form label { display: block; font-size: 10px; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
 .form input, .form select { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; }
