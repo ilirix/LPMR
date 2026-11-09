@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json};
 use axum::routing::{get, get_service, post};
 use axum::Router;
-use lpmr_core::devices::{scan_block_devices, BlockDeviceTree};
+use lpmr_core::devices::scan_block_devices;
 use lpmr_core::i18n::{Language, translate};
 use lpmr_core::lvm::{lvm_available, scan_lvm};
 use lpmr_core::ops::{execute, OperationKind, OperationRequest};
@@ -189,7 +189,7 @@ async fn zfs_pools() -> Json<serde_json::Value> {
     }
 }
 
-async fn health_audit() -> Result<Json<serde_json::Value>, AppError> {
+async fn health_audit() -> Json<serde_json::Value> {
     let installed = discover_installed_tools();
     let missing: Vec<_> = required_tools()
         .into_iter()
@@ -200,14 +200,18 @@ async fn health_audit() -> Result<Json<serde_json::Value>, AppError> {
         .iter()
         .map(|t| json!({"name": t.name, "purpose": t.purpose, "ok": true, "path": t.path}))
         .collect();
-    let tree: BlockDeviceTree = scan_block_devices()?;
-    Ok(Json(json!({
+    let (device_count, devices_error) = match scan_block_devices() {
+        Ok(tree) => (tree.devices.len(), None),
+        Err(e) => (0, Some(e.to_string())),
+    };
+    Json(json!({
         "tools_ok": present,
         "tools_missing": missing,
-        "device_count": tree.devices.len(),
+        "device_count": device_count,
         "zfs": zfs_available(),
         "proxmox": is_proxmox_node(),
-    })))
+        "error": devices_error,
+    }))
 }
 
 async fn vm_volumes() -> Json<serde_json::Value> {

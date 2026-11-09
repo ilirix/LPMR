@@ -603,11 +603,12 @@ async function pollJob(id) {
   state.jobPolling = false;
 }
 
-async function refreshPart(label, fn) {
+async function refreshPart(label, fn, onError) {
   try {
     await fn();
   } catch (e) {
     log(`${label}: ${e.message}`, "warn");
+    if (typeof onError === "function") onError();
   }
 }
 
@@ -631,17 +632,25 @@ async function refresh() {
     state.health = await api("/api/health-audit");
   });
   await refreshPart("zfs", async () => {
-    state.zfs = await api("/api/zfs/pools");
+    const zfs = await api("/api/zfs/pools");
+    state.zfs = zfs;
+    if (zfs.error) log(`zfs: ${zfs.error}`, "warn");
+  }, () => {
+    state.zfs = { available: false, pools: [] };
   });
   await refreshPart("lvm", async () => {
     state.lvm = await api("/api/lvm");
+  }, () => {
+    state.lvm = { available: false, pvs: [], vgs: [], lvs: [] };
   });
   await refreshPart("vm-volumes", async () => {
     const vm = await api("/api/vm-volumes");
     state.vmVolumes = vm.volumes || [];
     if (vm.error) log(`vm-volumes: ${vm.error}`, "warn");
+  }, () => {
+    state.vmVolumes = [];
   });
-  await loadPartitionMap();
+  await refreshPart("partitions", () => loadPartitionMap());
   paintTools();
   render();
   bind();
